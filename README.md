@@ -55,6 +55,10 @@ TANOIMG_ADMIN_PASSWORD='请换成强密码' docker compose up -d --build
 
 完整配置、发布、更新与备份步骤见 [Docker Hub 部署说明](docs/docker-hub.md)。
 
+## 登录安全
+
+支持可选 TOTP 二次验证、一次性恢复码和 Passkey 直接登录。在“账户安全”管理；Docker 部署启用 Passkey 需设置 `TANOIMG_PUBLIC_URL=https://你的域名`。备份完整数据卷，包含新增的 `auth.key` 加密密钥。详见 [认证配置与使用](docs/authentication.md)。
+
 ## 图库与上传体验
 
 - 图片右键或“更多”菜单可复制直链、HTML、Markdown、BBCode；管理员可设置全局背景、网站 Logo，或将图片移入回收站。

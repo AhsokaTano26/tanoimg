@@ -59,6 +59,7 @@ TANOIMG_ADMIN_PASSWORD='替换为强密码'
 TANOIMG_BIND=127.0.0.1
 TANOIMG_PORT=3000
 TANOIMG_TRUST_PROXY=false
+TANOIMG_PUBLIC_URL=https://img.example.com
 ```
 
 - 默认仅绑定本机 `127.0.0.1:3000`，适合宿主机 Nginx/Caddy 反向代理；域名及 HTTPS 在反向代理配置。
@@ -66,7 +67,8 @@ TANOIMG_TRUST_PROXY=false
 - 需要直接访问时可设 `TANOIMG_BIND=0.0.0.0` 并配置防火墙；管理员登录建议使用 HTTPS。
 - 私有 Docker Hub 仓库需要先在服务器执行 `docker login`，使用有读取权限的 Token。
 - 管理员密码环境变量用于首次初始化，已有账号不会被该变量重置。
-- `/data` 使用 Compose 命名卷，含 SQLite 数据库和图片。固定部署目录与 Compose 项目名，避免切换目录后创建另一个空卷。
+- Passkey 需要 `TANOIMG_PUBLIC_URL` 与浏览器实际 HTTPS 地址一致；留空可暂不启用，详见 [认证说明](authentication.md)。
+- `/data` 使用 Compose 命名卷，含 SQLite 数据库、认证加密密钥 `auth.key` 和图片。固定部署目录与 Compose 项目名，避免切换目录后创建另一个空卷。
 - `.env` 已排除出 Git 和 Docker 构建上下文。示例文件没有真实凭证。
 
 仓库根目录的 `docker-compose.yml` 继续用于本地源码构建；服务器使用 `deploy/compose.yml`，不要把两个文件合并执行。

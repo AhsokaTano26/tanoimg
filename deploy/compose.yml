@@ -5,6 +5,7 @@ services:
       - "${TANOIMG_BIND:-127.0.0.1}:${TANOIMG_PORT:-3000}:3000"
     environment:
       TANOIMG_ADMIN_PASSWORD: ${TANOIMG_ADMIN_PASSWORD:?Set an administrator password}
+      TANOIMG_PUBLIC_URL: ${TANOIMG_PUBLIC_URL:-}
       TANOIMG_TRUST_PROXY: ${TANOIMG_TRUST_PROXY:-false}
     volumes:
       - tanoimg_data:/data
