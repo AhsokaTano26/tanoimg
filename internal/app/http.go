@@ -62,6 +62,7 @@ func (a *App) Handler() http.Handler {
 	mux.HandleFunc("GET /api/settings/public", a.publicSettings)
 	mux.HandleFunc("PUT /api/settings/appearance", a.putAppearanceSettings)
 	mux.HandleFunc("GET /api/settings/stats", a.stats)
+	mux.HandleFunc("GET /api/version/check", a.checkVersion)
 	mux.HandleFunc("GET /api/notification", a.getNotification)
 	mux.HandleFunc("PUT /api/notification", a.putNotification)
 	mux.HandleFunc("POST /api/notification/test", a.testNotification)

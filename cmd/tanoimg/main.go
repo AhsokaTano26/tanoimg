@@ -12,6 +12,8 @@ import (
 	"github.com/AhsokaTano26/tanoimg/internal/app"
 )
 
+var version = "0.1.0"
+
 func main() {
 	command := "serve"
 	if len(os.Args) > 1 && (os.Args[1] == "serve" || os.Args[1] == "migrate") {
@@ -39,7 +41,7 @@ func main() {
 		fmt.Println(string(b))
 		return
 	}
-	a, err := app.New(app.Config{DataDir: *data, AdminUsername: env("TANOIMG_ADMIN_USER", "admin"), AdminPassword: os.Getenv("TANOIMG_ADMIN_PASSWORD"), TrustProxy: os.Getenv("TANOIMG_TRUST_PROXY") == "true"})
+	a, err := app.New(app.Config{DataDir: *data, Version: version, AdminUsername: env("TANOIMG_ADMIN_USER", "admin"), AdminPassword: os.Getenv("TANOIMG_ADMIN_PASSWORD"), TrustProxy: os.Getenv("TANOIMG_TRUST_PROXY") == "true"})
 	if err != nil {
 		log.Fatal(err)
 	}

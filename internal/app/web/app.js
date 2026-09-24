@@ -341,6 +341,15 @@ $('#account-btn').addEventListener('click', async () => { if (state.admin) { awa
 $('#login-from-settings').addEventListener('click', () => $('#login-dialog').showModal());
 $('#login-from-stats').addEventListener('click', () => $('#login-dialog').showModal());
 $('#refresh-stats').addEventListener('click', loadStatsView);
+$('#check-version').addEventListener('click', async () => {
+  const button = $('#check-version'); button.disabled = true;
+  $('#version-status').textContent = '正在检查…';
+  try {
+    const data = await api('/api/version/check');
+    $('#version-status').textContent = data.error ? `当前 ${data.currentVersion} · ${data.error}` : data.hasUpdate ? `当前 ${data.currentVersion} · 新版 ${data.latestVersion}` : `当前 ${data.currentVersion} · 已是最新版本`;
+  } catch(error) { $('#version-status').textContent = error.message; }
+  finally { button.disabled = false; }
+});
 $('#close-login').addEventListener('click', () => $('#login-dialog').close());
 $('#login-form').addEventListener('submit', async event => {
   event.preventDefault(); const form = new FormData(event.target); $('#login-error').textContent = '';

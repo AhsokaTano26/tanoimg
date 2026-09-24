@@ -1,4 +1,6 @@
 .PHONY: build
 
+VERSION ?= 0.1.0
+
 build:
-	go build -trimpath -o tanoimg ./cmd/tanoimg
+	go build -trimpath -ldflags "-X main.version=$(VERSION)" -o tanoimg ./cmd/tanoimg

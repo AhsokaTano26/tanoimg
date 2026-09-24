@@ -525,3 +525,20 @@ func TestSVGUploadAndAPNGDetection(t *testing.T) {
 		t.Fatalf("APNG detection: %s %v", format, err)
 	}
 }
+
+func TestVersionCheckRequiresAdminAndComparesRelease(t *testing.T) {
+	a := testApp(t)
+	a.Version = "1.0.0"
+	if got := adminRequest(a, "", http.MethodGet, "/api/version/check", ""); got.Code != 401 {
+		t.Fatalf("anonymous version check: %d", got.Code)
+	}
+	a.urlClient = &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		if r.URL.Host != "api.github.com" {
+			t.Errorf("unexpected host: %s", r.URL.Host)
+		}
+		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(`{"tag_name":"v1.2.0"}`)), Request: r}, nil
+	})}
+	if got := adminRequest(a, adminToken(t, a), http.MethodGet, "/api/version/check", ""); got.Code != 200 || !strings.Contains(got.Body.String(), `"hasUpdate":true`) || !strings.Contains(got.Body.String(), `"latestVersion":"v1.2.0"`) {
+		t.Fatalf("version check: %d %s", got.Code, got.Body.String())
+	}
+}

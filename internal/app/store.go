@@ -21,6 +21,7 @@ import (
 
 type Config struct {
 	DataDir       string
+	Version       string
 	AdminUsername string
 	AdminPassword string
 	TrustProxy    bool
@@ -29,6 +30,7 @@ type Config struct {
 type App struct {
 	DB               *sql.DB
 	DataDir          string
+	Version          string
 	limiter          chan struct{}
 	processing       chan struct{}
 	waiters          chan struct{}
@@ -99,7 +101,10 @@ func New(c Config) (*App, error) {
 		return nil, err
 	}
 	db.SetMaxOpenConns(1)
-	a := &App{DB: db, DataDir: c.DataDir, limiter: make(chan struct{}, 4), processing: make(chan struct{}, 1), waiters: make(chan struct{}, 32), TrustProxy: c.TrustProxy, urlClient: newURLClient(), moderationWake: make(chan struct{}, 1), publicActive: make(map[string]bool), notifyWake: make(chan struct{}, 1)}
+	if c.Version == "" {
+		c.Version = "dev"
+	}
+	a := &App{DB: db, DataDir: c.DataDir, Version: c.Version, limiter: make(chan struct{}, 4), processing: make(chan struct{}, 1), waiters: make(chan struct{}, 32), TrustProxy: c.TrustProxy, urlClient: newURLClient(), moderationWake: make(chan struct{}, 1), publicActive: make(map[string]bool), notifyWake: make(chan struct{}, 1)}
 	for _, q := range []string{
 		`PRAGMA journal_mode=WAL`,
 		`CREATE TABLE IF NOT EXISTS images (id TEXT PRIMARY KEY, uuid TEXT NOT NULL UNIQUE, filename TEXT NOT NULL, original_name TEXT NOT NULL DEFAULT '', format TEXT NOT NULL, size INTEGER NOT NULL, width INTEGER NOT NULL DEFAULT 0, height INTEGER NOT NULL DEFAULT 0, uploaded_by TEXT NOT NULL DEFAULT '', uploaded_by_type TEXT NOT NULL DEFAULT 'private', uploaded_at TEXT NOT NULL, updated_at TEXT NOT NULL, is_deleted INTEGER NOT NULL DEFAULT 0, is_nsfw INTEGER NOT NULL DEFAULT 0)`,
