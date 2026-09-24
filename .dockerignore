@@ -11,3 +11,6 @@ frontend/node_modules
 .env
 .env.*
 !.env.example
+
+# Local migration backups and archives must never enter build contexts.
+/tmp/

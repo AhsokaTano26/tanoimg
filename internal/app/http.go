@@ -34,6 +34,12 @@ func fail(w http.ResponseWriter, status int, msg string) {
 func (a *App) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /", a.page)
+	mux.HandleFunc("GET /api/admin/migrations", a.remoteMigrationHandler)
+	mux.HandleFunc("DELETE /api/admin/migrations/{id}", a.remoteMigrationHandler)
+	mux.HandleFunc("POST /api/admin/migrations", a.remoteMigrationHandler)
+	mux.HandleFunc("GET /api/admin/migrations/{id}", a.remoteMigrationHandler)
+	mux.HandleFunc("PUT /api/admin/migrations/{id}/archive", a.remoteMigrationHandler)
+	mux.HandleFunc("POST /api/admin/migrations/{id}/finalize", a.remoteMigrationHandler)
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) { ok(w, map[string]string{"status": "ok"}) })
 	mux.HandleFunc("POST /api/auth/login", a.authHandler(a.login))
 	mux.HandleFunc("GET /api/auth/methods", a.authHandler(func(w http.ResponseWriter, r *http.Request) {

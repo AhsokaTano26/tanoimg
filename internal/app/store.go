@@ -35,6 +35,10 @@ type Config struct {
 }
 
 type App struct {
+	migrationMu      sync.Mutex
+	migrationWG      sync.WaitGroup
+	migrationActive  string
+	migrationClosed  bool
 	authMu           sync.Mutex
 	authCipher       cipher.AEAD
 	webAuthn         *webauthn.WebAuthn
@@ -226,6 +230,10 @@ func ensureImageColumns(db *sql.DB) error {
 }
 
 func (a *App) Close() error {
+	a.migrationMu.Lock()
+	a.migrationClosed = true
+	a.migrationMu.Unlock()
+	a.migrationWG.Wait()
 	if a.moderationCancel != nil {
 		a.moderationCancel()
 		<-a.moderationDone
