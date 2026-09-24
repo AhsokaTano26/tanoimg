@@ -51,7 +51,7 @@ TANOIMG_ADMIN_PASSWORD='请换成强密码' docker compose up -d --build
 
 ## Docker Hub 自动发布与部署
 
-支持 GitHub Actions 自动测试并构建 amd64 / arm64 镜像，推送 Docker Hub。配置 `DOCKERHUB_USERNAME`、`DOCKERHUB_TOKEN` 两个 Secrets 后，镜像自动发布到 `<用户名>/tanoimg`；`main` 发布 `edge`，正式 `v*` 版本发布版本标签与 `latest`。服务器直接使用 `deploy/compose.yml` 拉取镜像，无需本地编译。
+支持 GitHub Actions 自动测试并构建 amd64 / arm64 镜像，推送 Docker Hub。配置 `DOCKERHUB_USERNAME`、`DOCKERHUB_TOKEN` 两个 Secrets 后，镜像自动发布到 `<用户名>/tanoimg`；`main` 发布 `latest`、`edge` 和 7 位短 SHA 标签，正式 `v*` 版本发布版本标签与 `latest`。服务器直接使用 `deploy/compose.yml` 拉取镜像，无需本地编译。
 
 完整配置、发布、更新与备份步骤见 [Docker Hub 部署说明](docs/docker-hub.md)。
 

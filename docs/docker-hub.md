@@ -19,7 +19,7 @@ GitHub 仓库 → Settings → Secrets and variables → Actions：
 
 | 触发方式 | 镜像标签 | 推送 |
 |---|---|---|
-| 向 `main` push | `edge`、`sha-完整提交ID` | 是 |
+| 向 `main` push | `latest`、`edge`、`sha-7位提交ID` | 是 |
 | push `v1.2.3` 标签 | `v1.2.3`、`1.2.3`、`1.2`、`latest`、SHA | 是 |
 | push `v1.3.0-rc.1` | 原始标签、预发布版本、SHA；不更新 `latest` | 是 |
 | Actions → Docker Hub → Run workflow | 按所选分支或标签生成标签；普通分支至少有 SHA | 是 |
@@ -32,7 +32,7 @@ git tag v1.2.3
 git push origin v1.2.3
 ```
 
-发布旧版本或手动重跑旧正式版本也可能更新 `latest`，生产环境建议固定版本标签或镜像 digest。
+`main` 每次构建都会更新 `latest`；发布旧版本或手动重跑旧正式版本也可能更新 `latest`，生产环境建议固定版本标签或镜像 digest。
 
 测试作业先安装前端依赖、运行前端测试、构建静态资源并执行 Go 测试。通过后 Buildx 构建 `linux/amd64` 和 `linux/arm64`，推送同一个多架构镜像。前端和 Go 在构建机本机架构运行，Go 交叉编译目标程序；QEMU 只用于目标运行镜像的少量准备命令。程序版本号来自镜像元数据。GitHub Actions 缓存复用构建层。
 
