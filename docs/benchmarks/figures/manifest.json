@@ -1,0 +1,24 @@
+{
+  "fonts": [
+    "Times New Roman",
+    "SimSun"
+  ],
+  "matplotlib": "3.11.2",
+  "dpi": 400,
+  "sources": {
+    "2026-09-25-batch.jsonl": "57c27aa256b18e04e24a8c053f37940bef25dc004e762455d164edf86deb5d2f",
+    "2026-09-25-convert-jpg.jsonl": "52da59738c3696a7bdf3b54028e9d7edc5962cff2f8a0cc966fd571440b1c689",
+    "2026-09-25-convert-webp.jsonl": "6a464fafe4589f8ff45f92227edbd25fdbaf6edf9dc6082edebd8bd019ccee5f",
+    "2026-09-25-download.jsonl": "2d9609d85f215a0a3b32db53db7d7dd0a8ddc8bde2cab5e9935a326d47f8a6bb",
+    "2026-09-25-gallery.jsonl": "7f1d876c6afb465b79b71807829299e06471a42558c5cbc9938e114006bd13e2",
+    "2026-09-25-sweep.jsonl": "fa2717542e411d1711e54a977b7a5cb31ecf51469234f5d00314f8abd7af04d7",
+    "2026-09-25-webp-sustained.jsonl": "dd37ec1a2893dcb2fa7747c04beff0942266ab01bee8b6ff6b0318507cefafbb"
+  },
+  "figures": [
+    "upload_concurrency",
+    "upload_latency_memory",
+    "batch_upload",
+    "conversion_pressure",
+    "read_concurrency"
+  ]
+}
