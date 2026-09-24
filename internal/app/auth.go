@@ -1,7 +1,6 @@
 package app
 
 import (
-	"crypto/rand"
 	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
@@ -80,20 +79,26 @@ func (a *App) login(w http.ResponseWriter, r *http.Request) {
 		fail(w, 500, "登录失败")
 		return
 	}
-	b := make([]byte, 32)
-	if _, err := rand.Read(b); err != nil {
+	enabled, err := a.totpEnabled(id)
+	if err != nil {
 		fail(w, 500, "登录失败")
 		return
 	}
-	token := hex.EncodeToString(b)
-	expires := time.Now().Add(7 * 24 * time.Hour)
-	if _, err := a.DB.Exec(`INSERT INTO sessions(token_hash,user_id,expires_at) VALUES(?,?,?)`, tokenHash(token), id, expires.Unix()); err != nil {
-		fail(w, 500, "登录失败")
+	if enabled {
+		binding, err := a.authBinding(w, r)
+		if err != nil {
+			fail(w, 500, "登录失败")
+			return
+		}
+		challenge, err := a.newChallenge(id, "totp-login", binding, nil)
+		if err != nil {
+			fail(w, 500, "登录失败")
+			return
+		}
+		ok(w, map[string]any{"requiresTOTP": true, "challenge": challenge})
 		return
 	}
-	http.SetCookie(w, &http.Cookie{Name: "tanoimg_session", Value: token, Path: "/", HttpOnly: true, SameSite: http.SameSiteLaxMode, Secure: r.TLS != nil || strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https"), Expires: expires})
-	a.enqueueNotification("login", "管理员登录", body.Username+" 已登录", map[string]any{"username": body.Username, "ip": a.clientIP(r)})
-	ok(w, map[string]any{"token": token, "user": map[string]string{"username": body.Username}})
+	a.issueSession(w, r, id)
 }
 
 func (a *App) logout(w http.ResponseWriter, r *http.Request) {
@@ -127,6 +132,7 @@ func (a *App) changePassword(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		OldPassword string `json:"oldPassword"`
 		NewPassword string `json:"newPassword"`
+		Code        string `json:"code"`
 	}
 	if json.NewDecoder(http.MaxBytesReader(w, r.Body, 8192)).Decode(&body) != nil || len(body.NewPassword) < 8 {
 		fail(w, 400, "新密码至少需要 8 位")
@@ -139,6 +145,15 @@ func (a *App) changePassword(w http.ResponseWriter, r *http.Request) {
 	}
 	if bcrypt.CompareHashAndPassword([]byte(oldHash), []byte(body.OldPassword)) != nil {
 		fail(w, 400, "旧密码错误")
+		return
+	}
+	enabled, err := a.totpEnabled(id)
+	if err != nil {
+		fail(w, 500, "验证失败")
+		return
+	}
+	if enabled && !a.useSecondFactor(id, body.Code) {
+		fail(w, 403, "请输入有效且未使用的动态码或恢复码")
 		return
 	}
 	newHash, err := bcrypt.GenerateFromPassword([]byte(body.NewPassword), bcrypt.DefaultCost)
@@ -157,6 +172,10 @@ func (a *App) changePassword(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if _, err := tx.Exec(`DELETE FROM sessions WHERE user_id=?`, id); err != nil {
+		fail(w, 500, "修改密码失败")
+		return
+	}
+	if _, err := tx.Exec(`DELETE FROM auth_challenges WHERE user_id=?`, id); err != nil {
 		fail(w, 500, "修改密码失败")
 		return
 	}

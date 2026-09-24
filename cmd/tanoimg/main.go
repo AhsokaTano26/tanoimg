@@ -41,7 +41,7 @@ func main() {
 		fmt.Println(string(b))
 		return
 	}
-	a, err := app.New(app.Config{DataDir: *data, Version: version, AdminUsername: env("TANOIMG_ADMIN_USER", "admin"), AdminPassword: os.Getenv("TANOIMG_ADMIN_PASSWORD"), TrustProxy: os.Getenv("TANOIMG_TRUST_PROXY") == "true"})
+	a, err := app.New(app.Config{DataDir: *data, Version: version, AdminUsername: env("TANOIMG_ADMIN_USER", "admin"), AdminPassword: os.Getenv("TANOIMG_ADMIN_PASSWORD"), TrustProxy: os.Getenv("TANOIMG_TRUST_PROXY") == "true", PublicURL: os.Getenv("TANOIMG_PUBLIC_URL")})
 	if err != nil {
 		log.Fatal(err)
 	}

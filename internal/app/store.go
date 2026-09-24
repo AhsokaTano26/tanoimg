@@ -1,12 +1,14 @@
 package app
 
 import (
+	"crypto/cipher"
 	"crypto/rand"
 	"database/sql"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/go-webauthn/webauthn/webauthn"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -25,9 +27,14 @@ type Config struct {
 	AdminUsername string
 	AdminPassword string
 	TrustProxy    bool
+	PublicURL     string
 }
 
 type App struct {
+	authMu           sync.Mutex
+	authCipher       cipher.AEAD
+	webAuthn         *webauthn.WebAuthn
+	publicURL        string
 	DB               *sql.DB
 	DataDir          string
 	Version          string
@@ -158,6 +165,10 @@ func New(c Config) (*App, error) {
 			db.Close()
 			return nil, err
 		}
+	}
+	if err := a.initSecurity(c.PublicURL); err != nil {
+		db.Close()
+		return nil, err
 	}
 	a.notifyEnabled.Store(a.notificationSettings().Enabled)
 	return a, nil
