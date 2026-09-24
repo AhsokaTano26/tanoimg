@@ -1,37 +1,19 @@
 import { createUploadQueue } from './upload-queue.mjs';
+import { request, session, toast as notify, updateSite } from './runtime.js';
 
-const $ = (selector) => document.querySelector(selector);
-const state = { admin: false, page: 1, totalPages: 1, recyclePage: 1, recycleTotalPages: 1, publicEnabled: false, publicConfig: null, safetyProviders: {} };
-const selectedImages = new Set();
-
+// Each routed page owns its listeners, request lifetime and upload queue.
+// Only shared preview dialogs are resolved outside the component root.
+export function mountPage(root, kind, admin, router) {
+  const shared = new Set(['#image-detail', '#image-detail-meta', '#image-dialog']);
+  const $ = selector => root.querySelector(selector) || (shared.has(selector) ? document.querySelector(selector) : null);
+  const state = { page: 1, totalPages: 1, recyclePage: 1, recycleTotalPages: 1, publicEnabled: false, publicConfig: null, safetyProviders: {} };
+  const selectedImages = new Set();
+  const lifetime = new AbortController();
+  let disposed = false;
+  const toast = message => { if (!disposed) notify(message); };
+  const api = (url, options = {}) => request(url, { ...options, signal: options.signal ? AbortSignal.any([options.signal, lifetime.signal]) : lifetime.signal });
 function iconMarkup(name) {
   return '<svg class="icon" aria-hidden="true"><use href="/icons.svg#' + name + '"></use></svg>';
-}
-function applyTheme(theme) {
-  document.documentElement.dataset.theme = theme;
-  $('#theme-toggle').innerHTML = iconMarkup(theme === 'dark' ? 'sun' : 'moon');
-  $('meta[name="theme-color"]').content = theme === 'dark' ? '#0c0e12' : '#f4f5f7';
-  $('#theme-toggle').setAttribute('aria-label', theme === 'dark' ? '切换浅色模式' : '切换深色模式');
-}
-applyTheme(document.documentElement.dataset.theme);
-
-function showAnnouncement(settings) {
-  const announcement = settings.announcement;
-  $('#announcement-banner').hidden = true;
-  if (!announcement?.enabled || !announcement.content) return;
-  if (announcement.displayType === 'banner') {
-    $('#announcement-banner').textContent = announcement.content;
-    $('#announcement-banner').hidden = false;
-  } else if (sessionStorage.getItem('tanoimg-announcement') !== announcement.content) {
-    $('#announcement-modal-content').textContent = announcement.content;
-    $('#announcement-dialog').showModal();
-    sessionStorage.setItem('tanoimg-announcement', announcement.content);
-  }
-}
-function applyLogo(url) {
-  const mark = $('.brand-mark');
-  mark.style.backgroundImage = imageCSS(url);
-  mark.innerHTML = url ? '' : iconMarkup('aperture');
 }
 function showModerationProvider() {
   const provider = $('#moderation-provider').value;
@@ -73,18 +55,16 @@ function notificationBody() {
 }
 
 function updateUploadHint() {
-  if (state.admin) { $('#upload-hint').textContent = '批量上传自动使用 4 路并发，可随时取消'; return; }
+  if (!$('#upload-hint')) return;
+  $('#dropzone').setAttribute('aria-disabled', String(!admin && !state.publicEnabled));
+  if (admin) { $('#upload-hint').textContent = '批量上传自动使用 4 路并发，可随时取消'; return; }
   const config = state.publicConfig;
   if (!config) return;
-  $('#upload-hint').textContent = config.enabled ? `支持 ${config.allowedFormats.join('、').toUpperCase()} · 单张最大 ${Math.round(config.maxFileSize / 1048576)} MB` : '公开上传已关闭，请管理员登录后上传';
+  $('#upload-hint').textContent = config.enabled ? `支持 ${config.allowedFormats.join('、').toUpperCase()} · 单张最大 ${Math.round(config.maxFileSize / 1048576)} MB` : '公共上传暂未开放';
 }
 
 function imageCSS(url) { return url ? `url(${JSON.stringify(url)})` : 'none'; }
-function applyBackground(url, blur) {
-  const layer = $('#site-background');
-  layer.style.backgroundImage = imageCSS(url);
-  layer.style.setProperty('--background-blur', `${blur}px`);
-}
+function applyBackground(url, blur) { updateSite({ backgroundUrl: url, backgroundBlur: blur }); }
 function previewBackground() {
   const url = $('#background-url').value.trim();
   const blur = Number($('#background-blur').value);
@@ -105,39 +85,10 @@ async function saveAppearance(url, blur) {
   toast('外观设置已保存');
 }
 
-async function api(url, options = {}) {
-  const response = await fetch(url, { credentials: 'same-origin', ...options });
-  let body;
-  try { body = await response.json(); } catch { throw new Error('服务器返回了无效响应'); }
-  if (!response.ok || !body.success) {
-    const error = new Error(body.message || `请求失败 (${response.status})`);
-    error.status = response.status;
-    throw error;
-  }
-  return body.data;
-}
-
-let toastTimer;
-function toast(message) {
-  const el = $('#toast'); el.textContent = message; el.classList.add('show');
-  clearTimeout(toastTimer); toastTimer = setTimeout(() => el.classList.remove('show'), 3200);
-}
-
-function showTab(tab) {
-  document.querySelectorAll('.view').forEach(el => el.classList.toggle('active', el.id === `${tab}-view`));
-  document.querySelectorAll('.nav-link').forEach(el => el.classList.toggle('active', el.dataset.tab === (tab === 'recycle' ? 'gallery' : tab)));
-  if (tab === 'gallery') loadGallery();
-  if (tab === 'recycle') loadRecycle();
-  if (tab === 'stats') loadStatsView();
-  if (tab === 'settings') loadSettings();
-  history.replaceState(null, '', tab === 'upload' ? '/' : `/${tab}`);
-  window.scrollTo(0, 0);
-}
-
 function imageCard(image, selectable = false) {
   const card = document.createElement('article'); card.className = 'image-card';
   const img = document.createElement('img'); img.src = image.url; img.alt = image.originalName || '图片'; img.loading = 'lazy';
-  img.addEventListener('click', () => { $('#image-detail').src = image.url; $('#image-detail').alt = image.originalName || '图片'; $('#image-detail-meta').textContent = `${image.originalName || image.filename} · ${(image.size / 1024).toFixed(1)} KB · ${image.width || '—'} × ${image.height || '—'}`; $('#image-dialog').showModal(); });
+  img?.addEventListener('click', () => { $('#image-detail').src = image.url; $('#image-detail').alt = image.originalName || '图片'; $('#image-detail-meta').textContent = `${image.originalName || image.filename} · ${(image.size / 1024).toFixed(1)} KB · ${image.width || '—'} × ${image.height || '—'}`; $('#image-dialog').showModal(); });
   const meta = document.createElement('div'); meta.className = 'image-meta';
   const name = document.createElement('div'); name.className = 'image-name'; name.textContent = image.originalName || image.filename;
   const sub = document.createElement('div'); sub.className = 'image-sub'; sub.textContent = `${(image.size / 1024).toFixed(1)} KB · ${image.width || '—'} × ${image.height || '—'}`;
@@ -148,7 +99,7 @@ function imageCard(image, selectable = false) {
     button.onclick = async () => { await navigator.clipboard.writeText(value); toast('已复制到剪贴板'); };
     actions.append(button);
   }
-  if (state.admin) {
+  if (admin) {
     if (selectable) {
       const label = document.createElement('label'); label.className = 'image-select';
       const checkbox = document.createElement('input'); checkbox.type = 'checkbox'; checkbox.checked = selectedImages.has(image.id); checkbox.setAttribute('aria-label', `选择 ${image.originalName || image.filename}`);
@@ -175,17 +126,20 @@ function renderImages(element, images) {
 }
 
 function updateSelection() {
+  if (!$('#selected-count')) return;
   $('#selected-count').textContent = `已选择 ${selectedImages.size} 张`;
   $('#delete-selected').disabled = selectedImages.size === 0;
 }
 
 async function loadRecent() {
-  try { const data = await api('/api/images?limit=4'); renderImages($('#recent-grid'), data.images); } catch (error) { toast(error.message); }
+  if (!$('#recent-grid')) return;
+  try { const data = await api('/api/images?limit=4' + (admin ? '' : '&scope=public')); renderImages($('#recent-grid'), data.images); } catch (error) { toast(error.message); }
 }
 async function loadGallery() {
+  if (!$('#gallery-grid')) return;
   try {
     selectedImages.clear(); updateSelection();
-    const data = await api(`/api/images?page=${state.page}&limit=20`);
+    const data = await api(`/api/images?page=${state.page}&limit=20${admin ? '' : '&scope=public'}`);
     renderImages($('#gallery-grid'), data.images);
     state.totalPages = data.pagination.totalPages;
     $('#page-label').textContent = `第 ${state.page} 页 · 共 ${data.pagination.total} 张`;
@@ -218,8 +172,6 @@ async function loadRecycle() {
   grid.replaceChildren(loading);
   $('#recycle-page-label').textContent = '正在加载…';
   $('#recycle-prev').disabled = true; $('#recycle-next').disabled = true;
-  await refreshAuth();
-  if (!state.admin) return;
   try {
     const data = await api(`/api/images/deleted?page=${state.recyclePage}&limit=20`);
     state.recycleTotalPages = Math.max(1, data.pagination.totalPages);
@@ -244,8 +196,6 @@ async function loadRecycle() {
 }
 
 async function loadStatsView() {
-  await refreshAuth();
-  if (!state.admin) return;
   try {
     const data = await api('/api/settings/stats');
     const numbers = {total:data.totalImages,public:data.publicImages,private:data.privateImages,deleted:data.deletedImagesCount,moderated:data.moderatedImagesCount,nsfw:data.nsfwImagesCount};
@@ -256,20 +206,9 @@ async function loadStatsView() {
   } catch(error) { toast(error.message); }
 }
 
-async function refreshAuth() {
-  try { const auth = await api('/api/auth/verify'); state.admin = true; $('#admin-username').value = auth.user.username; } catch { state.admin = false; }
-  $('#account-btn').textContent = state.admin ? '退出登录' : '管理员登录';
-  $('#settings-locked').hidden = state.admin; $('#settings-content').hidden = !state.admin;
-  $('#stats-locked').hidden = state.admin; $('#stats-content').hidden = !state.admin;
-  $('#recycle-locked').hidden = state.admin; $('#recycle-content').hidden = !state.admin;
-  $('#open-recycle').hidden = !state.admin;
-  $('#url-upload-panel').hidden = !state.admin;
-  $('#gallery-selection').hidden = !state.admin;
-  updateUploadHint();
-}
-
 async function loadSettings() {
-  await refreshAuth(); if (!state.admin) return;
+  if (!$('#settings-content')) return;
+  $('#admin-username').value = session.username;
   try {
     const [stats, config, keys, blacklist, appearance, privateConfig, nsfw, notification] = await Promise.all([api('/api/settings/stats'), api('/api/config/public'), api('/api/apikeys'), api('/api/blacklist?limit=100'), api('/api/settings'), api('/api/config/private'), api('/api/images/nsfw?limit=20'), api('/api/notification')]);
     fillAppearance(appearance);
@@ -315,7 +254,7 @@ async function loadSettings() {
 }
 
 async function uploadOne(file, signal) {
-  const endpoint = state.publicEnabled && !state.admin ? '/api/upload/public' : '/api/upload/private';
+  const endpoint = admin ? '/api/upload/private' : '/api/upload/public';
   for (let attempt = 0; attempt < 3; attempt++) {
     const body = new FormData(); body.append('file', file);
     try { return await api(endpoint, { method: 'POST', body, signal }); }
@@ -328,6 +267,7 @@ async function uploadOne(file, signal) {
 
 const failedFiles = [];
 function showUploadResult(file, image, error, retryable = true) {
+  if (disposed) return;
   const row = document.createElement('div'); row.className = `upload-result${error ? ' error' : ''}`;
   if (image) {
     const preview = document.createElement('img'); preview.src = image.url; preview.alt = ''; preview.loading = 'lazy'; row.append(preview);
@@ -352,6 +292,7 @@ const uploadQueue = createUploadQueue({
   upload: uploadOne,
   onResult: showUploadResult,
   onProgress: progress => {
+    if (disposed) return;
     $('#upload-progress').hidden = false;
     $('#upload-progress-title').textContent = `${progress.stopped ? '已取消' : progress.completed === progress.total ? '上传完成' : '正在上传'} ${progress.completed.toLocaleString()} / ${progress.total.toLocaleString()}`;
     $('#upload-progress-meta').textContent = `${(progress.completed - progress.failed - progress.cancelled).toLocaleString()} 成功 · ${progress.failed.toLocaleString()} 失败${progress.cancelled ? ` · ${progress.cancelled.toLocaleString()} 取消` : ''}`;
@@ -360,6 +301,7 @@ const uploadQueue = createUploadQueue({
     $('#cancel-upload').disabled = progress.stopped || (progress.active === 0 && progress.pending === 0);
   },
   onIdle: progress => {
+    if (disposed) return;
     $('#retry-failed').hidden = failedFiles.length === 0;
     if (progress.stopped) toast('已取消剩余上传');
     else toast(progress.failed ? `上传结束，${progress.failed} 张失败` : `已上传 ${progress.total} 张图片`);
@@ -368,6 +310,7 @@ const uploadQueue = createUploadQueue({
 });
 
 function uploadFiles(files) {
+  if (!admin && !state.publicEnabled) { toast('公共上传暂未开放'); return; }
   if (!files.length) return;
   const previous = uploadQueue.snapshot();
   if (previous.active === 0 && previous.pending === 0) {
@@ -378,27 +321,20 @@ function uploadFiles(files) {
   if (!uploadQueue.add(files)) toast('请等待当前批次取消完成');
 }
 
-document.querySelectorAll('[data-tab]').forEach(el => el.addEventListener('click', () => showTab(el.dataset.tab)));
-$('#dropzone').addEventListener('click', () => $('#file-input').click());
-$('#dropzone').addEventListener('keydown', event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); $('#file-input').click(); } });
-$('#file-input').addEventListener('change', event => { uploadFiles([...event.target.files]); event.target.value = ''; });
-for (const type of ['dragenter','dragover']) $('#dropzone').addEventListener(type, event => { event.preventDefault(); $('#dropzone').classList.add('dragging'); });
-for (const type of ['dragleave','drop']) $('#dropzone').addEventListener(type, event => { event.preventDefault(); $('#dropzone').classList.remove('dragging'); });
-$('#dropzone').addEventListener('drop', event => uploadFiles([...event.dataTransfer.files]));
-document.addEventListener('paste', event => { const files = [...(event.clipboardData?.files || [])]; if (files.length) uploadFiles(files); });
-$('#cancel-upload').addEventListener('click', () => uploadQueue.cancel());
-$('#retry-failed').addEventListener('click', () => uploadFiles(failedFiles.splice(0)));
-$('#theme-toggle').addEventListener('click', () => { const next = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark'; localStorage.setItem('tanoimg-theme', next); applyTheme(next); });
-$('#close-image').addEventListener('click', () => $('#image-dialog').close());
-$('#close-announcement').addEventListener('click', () => $('#announcement-dialog').close());
-$('#delete-selected').addEventListener('click', async () => { const ids = [...selectedImages]; if (!ids.length || !confirm(`将选中的 ${ids.length} 张图片移入回收站？`)) return; try { const result = await api('/api/images/batch', {method:'DELETE', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ids})}); toast(`已移入回收站 ${result.deletedCount} 张，可从图库右上角恢复`); await loadGallery(); await loadRecent(); } catch(error){toast(error.message);} });
-$('#url-upload-form').addEventListener('submit', async event => { event.preventDefault(); if (!state.admin) return; const urls = [...new Set($('#url-list').value.split(/\r?\n/).map(x=>x.trim()).filter(Boolean))]; if (!urls.length) return; const button = event.submitter; button.disabled = true; let completed = 0, failed = 0; try { for (let start = 0; start < urls.length; start += 1000) { const chunk = urls.slice(start, start + 1000); const result = await api('/api/upload/url', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({url:chunk})}); completed += result.successCount; failed += result.errorCount; $('#url-upload-status').textContent = `${Math.min(start+chunk.length, urls.length)} / ${urls.length} · ${completed} 成功 · ${failed} 失败`; result.results.forEach(item => showUploadResult({name:item.url}, item.data, null)); result.errors.forEach(item => showUploadResult({name:item.url}, null, new Error(item.error), false)); } $('#url-list').value = ''; await loadRecent(); toast(`URL 上传完成：${completed} 成功，${failed} 失败`); } catch(error){toast(error.message);} finally {button.disabled = false;} });
-$('#account-btn').addEventListener('click', async () => { if (state.admin) { await api('/api/auth/logout',{method:'POST'}); state.admin=false; await refreshAuth(); showTab('upload'); toast('已退出登录'); } else $('#login-dialog').showModal(); });
-$('#login-from-settings').addEventListener('click', () => $('#login-dialog').showModal());
-$('#login-from-recycle').addEventListener('click', () => $('#login-dialog').showModal());
-$('#login-from-stats').addEventListener('click', () => $('#login-dialog').showModal());
-$('#refresh-stats').addEventListener('click', loadStatsView);
-$('#check-version').addEventListener('click', async () => {
+$('#dropzone')?.addEventListener('click', () => { if (admin || state.publicEnabled) $('#file-input').click(); });
+$('#dropzone')?.addEventListener('keydown', event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); if (admin || state.publicEnabled) $('#file-input').click(); } });
+$('#file-input')?.addEventListener('change', event => { uploadFiles([...event.target.files]); event.target.value = ''; });
+for (const type of ['dragenter','dragover']) $('#dropzone')?.addEventListener(type, event => { event.preventDefault(); $('#dropzone').classList.add('dragging'); });
+for (const type of ['dragleave','drop']) $('#dropzone')?.addEventListener(type, event => { event.preventDefault(); $('#dropzone').classList.remove('dragging'); });
+$('#dropzone')?.addEventListener('drop', event => uploadFiles([...event.dataTransfer.files]));
+const paste = event => { const files = [...(event.clipboardData?.files || [])]; if (files.length) uploadFiles(files); };
+if (kind === 'upload') document?.addEventListener('paste', paste, { signal: lifetime.signal });
+$('#cancel-upload')?.addEventListener('click', () => uploadQueue.cancel());
+$('#retry-failed')?.addEventListener('click', () => uploadFiles(failedFiles.splice(0)));
+$('#delete-selected')?.addEventListener('click', async () => { const ids = [...selectedImages]; if (!ids.length || !confirm(`将选中的 ${ids.length} 张图片移入回收站？`)) return; try { const result = await api('/api/images/batch', {method:'DELETE', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ids})}); toast(`已移入回收站 ${result.deletedCount} 张，可从图库右上角恢复`); await loadGallery(); await loadRecent(); } catch(error){toast(error.message);} });
+$('#url-upload-form')?.addEventListener('submit', async event => { event.preventDefault(); if (!admin) return; const urls = [...new Set($('#url-list').value.split(/\r?\n/).map(x=>x.trim()).filter(Boolean))]; if (!urls.length) return; const button = event.submitter; button.disabled = true; let completed = 0, failed = 0; try { for (let start = 0; start < urls.length; start += 1000) { const chunk = urls.slice(start, start + 1000); const result = await api('/api/upload/url', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({url:chunk})}); completed += result.successCount; failed += result.errorCount; $('#url-upload-status').textContent = `${Math.min(start+chunk.length, urls.length)} / ${urls.length} · ${completed} 成功 · ${failed} 失败`; result.results.forEach(item => showUploadResult({name:item.url}, item.data, null)); result.errors.forEach(item => showUploadResult({name:item.url}, null, new Error(item.error), false)); } $('#url-list').value = ''; await loadRecent(); toast(`URL 上传完成：${completed} 成功，${failed} 失败`); } catch(error){toast(error.message);} finally {button.disabled = false;} });
+$('#refresh-stats')?.addEventListener('click', loadStatsView);
+$('#check-version')?.addEventListener('click', async () => {
   const button = $('#check-version'); button.disabled = true;
   $('#version-status').textContent = '正在检查…';
   try {
@@ -407,34 +343,25 @@ $('#check-version').addEventListener('click', async () => {
   } catch(error) { $('#version-status').textContent = error.message; }
   finally { button.disabled = false; }
 });
-$('#close-login').addEventListener('click', () => $('#login-dialog').close());
-$('#login-form').addEventListener('submit', async event => {
-  event.preventDefault(); const form = new FormData(event.target); $('#login-error').textContent = '';
-  try { await api('/api/auth/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(Object.fromEntries(form))}); $('#login-dialog').close(); event.target.reset(); await refreshAuth(); toast('登录成功'); if ($('#settings-view').classList.contains('active')) loadSettings(); else if ($('#stats-view').classList.contains('active')) loadStatsView(); else if ($('#recycle-view').classList.contains('active')) loadRecycle(); else loadRecent(); }
-  catch (error) { $('#login-error').textContent = error.message; }
-});
-$('#refresh-gallery').addEventListener('click',loadGallery);
-$('#open-recycle').addEventListener('click', () => { state.recyclePage = 1; showTab('recycle'); });
-$('#open-recycle-settings').addEventListener('click', () => { state.recyclePage = 1; showTab('recycle'); });
-$('#back-to-gallery').addEventListener('click', () => showTab('gallery'));
-$('#recycle-prev').addEventListener('click', () => { if (state.recyclePage > 1) { state.recyclePage--; loadRecycle(); } });
-$('#recycle-next').addEventListener('click', () => { if (state.recyclePage < state.recycleTotalPages) { state.recyclePage++; loadRecycle(); } });
-$('#prev-page').addEventListener('click',()=>{if(state.page>1){state.page--;loadGallery();}});
-$('#next-page').addEventListener('click',()=>{if(state.page<state.totalPages){state.page++;loadGallery();}});
-$('#save-public').addEventListener('click',async()=>{
+$('#refresh-gallery')?.addEventListener('click',loadGallery);
+$('#recycle-prev')?.addEventListener('click', () => { if (state.recyclePage > 1) { state.recyclePage--; loadRecycle(); } });
+$('#recycle-next')?.addEventListener('click', () => { if (state.recyclePage < state.recycleTotalPages) { state.recyclePage++; loadRecycle(); } });
+$('#prev-page')?.addEventListener('click',()=>{if(state.page>1){state.page--;loadGallery();}});
+$('#next-page')?.addEventListener('click',()=>{if(state.page<state.totalPages){state.page++;loadGallery();}});
+$('#save-public')?.addEventListener('click',async()=>{
   const size = Number($('#public-max').value); if (!Number.isInteger(size)||size<1||size>100) { toast('文件上限需为 1–100 MB'); return; }
   const formats = [...new Set($('#public-formats').value.split(',').map(x=>x.trim().toLowerCase()).filter(Boolean))];
   const rateLimit = Number($('#public-rate').value);
   if (!formats.length || !Number.isInteger(rateLimit) || rateLimit<1 || rateLimit>1000) { toast('请输入有效的格式和上传频率'); return; }
   try { await api('/api/config/public',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({enabled:$('#public-enabled').checked,maxFileSize:size*1048576,allowedFormats:formats,rateLimit,allowConcurrent:$('#public-concurrent').checked})}); state.publicEnabled=$('#public-enabled').checked; state.publicConfig = { enabled: state.publicEnabled, maxFileSize: size * 1048576, allowedFormats: formats }; updateUploadHint(); toast('公开上传设置已保存'); } catch(error){toast(error.message);}
 });
-$('#public-processing-form').addEventListener('submit', async event => {
+$('#public-processing-form')?.addEventListener('submit', async event => {
   event.preventDefault();
   try { await api('/api/config/public', {method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(processingValues('public'))}); toast('公开上传图片处理已保存'); }
   catch(error) { toast(error.message); }
 });
-$('#moderation-provider').addEventListener('change', showModerationProvider);
-$('#moderation-form').addEventListener('submit', async event => {
+$('#moderation-provider')?.addEventListener('change', showModerationProvider);
+$('#moderation-form')?.addEventListener('submit', async event => {
   event.preventDefault(); const provider = $('#moderation-provider').value;
   const threshold = Number($('#moderation-threshold').value);
   if (!Number.isFinite(threshold) || threshold<0 || threshold>1) {toast('审核阈值需在 0–1 之间');return;}
@@ -442,18 +369,18 @@ $('#moderation-form').addEventListener('submit', async event => {
   const contentSafety = {enabled:$('#moderation-enabled').checked,provider,autoBlacklistIp:$('#moderation-blacklist').checked,providers:state.safetyProviders};
   try { await api('/api/config/public',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({contentSafety})}); toast('审核设置已保存'); } catch(error){toast(error.message);}
 });
-$('#notification-method').addEventListener('change', showNotificationMethod);
-$('#notification-form').addEventListener('submit', async event => { event.preventDefault(); try { const saved = await api('/api/notification', {method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(notificationBody())}); fillNotification(saved); toast('通知设置已保存'); } catch(error){toast(error.message);} });
-$('#test-notification').addEventListener('click', async () => { const button = $('#test-notification'); button.disabled = true; try { await api('/api/notification/test', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(notificationBody())}); toast('测试通知已发送'); } catch(error){toast(error.message);} finally {button.disabled = false;} });
-$('#site-form').addEventListener('submit', async event => { event.preventDefault(); const body = {appName:$('#site-name').value.trim(), appLogo:$('#site-logo').value.trim(), siteUrl:$('#site-url').value.trim(), announcement:{enabled:$('#announcement-enabled').checked, content:$('#announcement-content').value, displayType:$('#announcement-type').value}}; try { const saved = await api('/api/settings', {method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)}); $('#brand-name').textContent = saved.appName; document.title = `${saved.appName} · 图片存储`; applyLogo(saved.appLogo); showAnnouncement(saved); toast('站点信息已保存'); } catch(error){toast(error.message);} });
-$('#private-form').addEventListener('submit', async event => { event.preventDefault(); const size = Number($('#private-max').value); if (!Number.isInteger(size) || size<1 || size>200) {toast('文件上限需为 1–200 MB');return;} try { await api('/api/config/private', {method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify({maxFileSize:size*1048576,showOnHomepage:$('#private-homepage').checked,...processingValues('private')})}); toast('私有上传设置已保存'); await loadGallery(); } catch(error){toast(error.message);} });
-$('#username-form').addEventListener('submit', async event => { event.preventDefault(); try { await api('/api/admin/username', {method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify({username:$('#admin-username').value.trim()})}); toast('用户名已修改'); } catch(error){toast(error.message);} });
-$('#hard-delete').addEventListener('click', async () => { if (!confirm('永久删除回收站中的图片文件？此操作无法撤销。')) return; try { const result = await api('/api/settings/hard-delete', {method:'POST'}); toast(`永久删除 ${result.deletedCount} 张图片`); await loadSettings(); } catch(error){toast(error.message);} });
-$('#clear-nsfw').addEventListener('click', async () => { if (!confirm('永久删除所有违规图片文件？此操作无法撤销。')) return; try { const result = await api('/api/images/nsfw-clear', {method:'POST'}); toast(`清空 ${result.deletedCount} 张违规图片`); await loadSettings(); } catch(error){toast(error.message);} });
-$('#background-url').addEventListener('input', previewBackground);
-$('#background-blur').addEventListener('input', previewBackground);
-$('#upload-background').addEventListener('click', () => $('#background-file').click());
-$('#background-file').addEventListener('change', async event => {
+$('#notification-method')?.addEventListener('change', showNotificationMethod);
+$('#notification-form')?.addEventListener('submit', async event => { event.preventDefault(); try { const saved = await api('/api/notification', {method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(notificationBody())}); fillNotification(saved); toast('通知设置已保存'); } catch(error){toast(error.message);} });
+$('#test-notification')?.addEventListener('click', async () => { const button = $('#test-notification'); button.disabled = true; try { await api('/api/notification/test', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(notificationBody())}); toast('测试通知已发送'); } catch(error){toast(error.message);} finally {button.disabled = false;} });
+$('#site-form')?.addEventListener('submit', async event => { event.preventDefault(); const body = {appName:$('#site-name').value.trim(), appLogo:$('#site-logo').value.trim(), siteUrl:$('#site-url').value.trim(), announcement:{enabled:$('#announcement-enabled').checked, content:$('#announcement-content').value, displayType:$('#announcement-type').value}}; try { const saved = await api('/api/settings', {method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)}); updateSite(saved); toast('站点信息已保存'); } catch(error){toast(error.message);} });
+$('#private-form')?.addEventListener('submit', async event => { event.preventDefault(); const size = Number($('#private-max').value); if (!Number.isInteger(size) || size<1 || size>200) {toast('文件上限需为 1–200 MB');return;} try { await api('/api/config/private', {method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify({maxFileSize:size*1048576,showOnHomepage:$('#private-homepage').checked,...processingValues('private')})}); toast('私有上传设置已保存'); await loadGallery(); } catch(error){toast(error.message);} });
+$('#username-form')?.addEventListener('submit', async event => { event.preventDefault(); try { await api('/api/admin/username', {method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify({username:$('#admin-username').value.trim()})}); toast('用户名已修改'); } catch(error){toast(error.message);} });
+$('#hard-delete')?.addEventListener('click', async () => { if (!confirm('永久删除回收站中的图片文件？此操作无法撤销。')) return; try { const result = await api('/api/settings/hard-delete', {method:'POST'}); toast(`永久删除 ${result.deletedCount} 张图片`); await loadSettings(); } catch(error){toast(error.message);} });
+$('#clear-nsfw')?.addEventListener('click', async () => { if (!confirm('永久删除所有违规图片文件？此操作无法撤销。')) return; try { const result = await api('/api/images/nsfw-clear', {method:'POST'}); toast(`清空 ${result.deletedCount} 张违规图片`); await loadSettings(); } catch(error){toast(error.message);} });
+$('#background-url')?.addEventListener('input', previewBackground);
+$('#background-blur')?.addEventListener('input', previewBackground);
+$('#upload-background')?.addEventListener('click', () => $('#background-file').click());
+$('#background-file')?.addEventListener('change', async event => {
   const file = event.target.files[0];
   event.target.value = '';
   if (!file) return;
@@ -467,34 +394,57 @@ $('#background-file').addEventListener('change', async event => {
     status.textContent = '上传完成，请保存外观';
   } catch (error) { status.textContent = '上传失败'; toast(error.message); }
 });
-$('#appearance-form').addEventListener('submit', async event => {
+$('#appearance-form')?.addEventListener('submit', async event => {
   event.preventDefault();
   try { await saveAppearance($('#background-url').value.trim(), Number($('#background-blur').value)); }
   catch (error) { toast(error.message); }
 });
-$('#reset-background').addEventListener('click', async () => {
+$('#reset-background')?.addEventListener('click', async () => {
   try { await saveAppearance('', 0); $('#background-upload-status').textContent = '支持 JPG、PNG、GIF、WebP'; }
   catch (error) { toast(error.message); }
 });
-$('#create-key').addEventListener('click',async()=>{const name=$('#key-name').value.trim();if(!name)return;try{await api('/api/apikeys',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name})});$('#key-name').value='';loadSettings();toast('密钥已创建');}catch(error){toast(error.message);}});
-$('#password-form').addEventListener('submit', async event => {
+$('#create-key')?.addEventListener('click',async()=>{const name=$('#key-name').value.trim();if(!name)return;try{await api('/api/apikeys',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name})});$('#key-name').value='';loadSettings();toast('密钥已创建');}catch(error){toast(error.message);}});
+$('#password-form')?.addEventListener('submit', async event => {
   event.preventDefault();
   const body = Object.fromEntries(new FormData(event.target));
   try {
     await api('/api/admin/password', { method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body) });
-    event.target.reset(); state.admin = false; await refreshAuth(); showTab('upload'); toast('密码已修改，请重新登录');
+    event.target.reset(); session.admin = false; session.username = ''; await router.replace('/login'); toast('密码已修改，请重新登录');
   } catch (error) { toast(error.message); }
 });
-$('#blacklist-form').addEventListener('submit', async event => {
+$('#blacklist-form')?.addEventListener('submit', async event => {
   event.preventDefault();
   try { await api('/api/blacklist', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(Object.fromEntries(new FormData(event.target)))}); event.target.reset(); await loadSettings(); toast('地址已加入黑名单'); }
   catch(error) { toast(error.message); }
 });
 
-(async()=>{
-  try { const settings=await api('/api/settings/public'); if(settings.appName){$('#brand-name').textContent=settings.appName;document.title=`${settings.appName} · 图片存储`;} applyBackground(settings.backgroundUrl || '', Number(settings.backgroundBlur) || 0); applyLogo(settings.appLogo || ''); showAnnouncement(settings); } catch {}
-  try { const config=await api('/api/config/public');state.publicEnabled=config.enabled;state.publicConfig=config;updateUploadHint(); } catch {}
-  await refreshAuth(); await loadRecent();
-  const tab=location.pathname.slice(1); if(['gallery','recycle','stats','api','settings'].includes(tab))showTab(tab);
-  else window.scrollTo(0, 0);
-})();
+  const ready = async () => {
+    if (kind === 'upload') {
+      try {
+        const config = await api('/api/config/public');
+        state.publicEnabled = config.enabled;
+        state.publicConfig = config;
+        updateUploadHint();
+        await loadRecent();
+      } catch (error) { toast(error.message); }
+    } else if (kind === 'gallery') await loadGallery();
+    else if (kind === 'recycle') await loadRecycle();
+    else if (kind === 'stats') await loadStatsView();
+    else if (kind === 'settings') await loadSettings();
+  };
+  ready().catch(error => toast(error.message));
+  return {
+    canLeave() {
+      const progress = uploadQueue.snapshot();
+      if (progress.active || progress.pending) return confirm('图片仍在上传，离开将取消剩余上传。确定离开？');
+      return true;
+    },
+    dispose() {
+      disposed = true;
+      lifetime.abort();
+      uploadQueue.cancel();
+      failedFiles.length = 0;
+      selectedImages.clear();
+    },
+  };
+}

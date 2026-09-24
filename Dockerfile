@@ -1,8 +1,16 @@
+FROM node:22-alpine AS frontend
+WORKDIR /src/frontend
+COPY frontend/package.json frontend/package-lock.json ./
+RUN npm ci
+COPY frontend/ ./
+RUN npm run build
+
 FROM golang:1.26-alpine AS build
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
+COPY --from=frontend /src/internal/app/web ./internal/app/web
 RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /tanoimg ./cmd/tanoimg
 
 FROM alpine:3.22

@@ -5,6 +5,7 @@ import (
 	"embed"
 	"encoding/hex"
 	"encoding/json"
+	"io/fs"
 	"net/http"
 	"net/url"
 	"os"
@@ -91,18 +92,27 @@ func (a *App) Handler() http.Handler {
 func (a *App) page(w http.ResponseWriter, r *http.Request) {
 	name := "index.html"
 	switch r.URL.Path {
-	case "/", "/login", "/gallery", "/recycle", "/settings", "/api", "/stats":
+	case "/", "/login", "/gallery", "/upload":
+	case "/admin", "/admin/gallery", "/admin/upload", "/admin/recycle", "/admin/settings", "/admin/api", "/admin/stats", "/recycle", "/settings", "/api", "/stats":
+		if a.userID(r) == "" {
+			target := r.URL.Path
+			if !strings.HasPrefix(target, "/admin") {
+				target = "/admin" + target
+			}
+			w.Header().Set("Cache-Control", "no-store")
+			http.Redirect(w, r, "/login?redirect="+url.QueryEscape(target), http.StatusSeeOther)
+			return
+		}
 	case "/app.css":
 		name = "app.css"
 	case "/icons.svg":
 		name = "icons.svg"
-	case "/app.js":
-		name = "app.js"
-	case "/upload-queue.mjs":
-		name = "upload-queue.mjs"
 	default:
-		http.NotFound(w, r)
-		return
+		name = strings.TrimPrefix(r.URL.Path, "/")
+		if !strings.HasPrefix(name, "assets/") || !fs.ValidPath(name) {
+			http.NotFound(w, r)
+			return
+		}
 	}
 	b, err := webFiles.ReadFile("web/" + name)
 	if err != nil {
@@ -111,6 +121,7 @@ func (a *App) page(w http.ResponseWriter, r *http.Request) {
 	}
 	switch path.Ext(name) {
 	case ".html":
+		w.Header().Set("Cache-Control", "no-store")
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	case ".svg":
 		w.Header().Set("Content-Type", "image/svg+xml")
@@ -124,7 +135,7 @@ func (a *App) page(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *App) images(w http.ResponseWriter, r *http.Request) {
-	admin := a.userID(r) != ""
+	admin := a.userID(r) != "" && r.URL.Query().Get("scope") != "public"
 	page, _ := strconv.Atoi(r.URL.Query().Get("page"))
 	if page < 1 {
 		page = 1

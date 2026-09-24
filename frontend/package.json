@@ -1,0 +1,12 @@
+{
+  "name": "tanoimg-ui",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "build": "vite build",
+    "test": "node --test tests/*.test.js ../internal/app/web_tests/*.test.mjs"
+  },
+  "dependencies": { "vue": "^3.5.0", "vue-router": "^4.5.0" },
+  "devDependencies": { "vite": "^7.0.0", "@vitejs/plugin-vue": "^6.0.0" }
+}

@@ -11,6 +11,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -179,12 +180,16 @@ func TestUploadBurstWaitsForFreeSlot(t *testing.T) {
 	}
 }
 
-func TestUploadQueueModuleIsServed(t *testing.T) {
+func TestFrontendEntryModuleIsServed(t *testing.T) {
 	a := testApp(t)
-	rec := httptest.NewRecorder()
-	a.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/upload-queue.mjs", nil))
+	page := adminRequest(a, "", http.MethodGet, "/", "")
+	match := regexp.MustCompile(`src="(/assets/[^"]+\.js)"`).FindStringSubmatch(page.Body.String())
+	if len(match) != 2 {
+		t.Fatalf("missing bundled frontend: %s", page.Body.String())
+	}
+	rec := adminRequest(a, "", http.MethodGet, match[1], "")
 	if rec.Code != http.StatusOK || !strings.HasPrefix(rec.Header().Get("Content-Type"), "text/javascript") {
-		t.Fatalf("upload module: %d %s", rec.Code, rec.Header().Get("Content-Type"))
+		t.Fatalf("frontend module: %d %s", rec.Code, rec.Header().Get("Content-Type"))
 	}
 }
 

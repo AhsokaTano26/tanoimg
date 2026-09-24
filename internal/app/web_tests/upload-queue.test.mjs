@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { createUploadQueue } from '../web/upload-queue.mjs';
+import { createUploadQueue } from '../../../frontend/src/upload-queue.mjs';
 
 test('a large batch never starts more than four uploads and finishes once', async () => {
   let active = 0;
