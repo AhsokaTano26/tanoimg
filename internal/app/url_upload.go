@@ -176,6 +176,7 @@ func (a *App) importRemoteImage(r *http.Request, raw, uploadedBy, uploadedByType
 		os.Remove(dest)
 		return Image{}, err
 	}
+	a.enqueueNotification("upload", "图片上传", original+" 已从 URL 上传", map[string]any{"id": im.ID, "filename": im.Filename, "url": im.URL, "size": im.Size, "ip": im.IP, "type": im.UploadedByType})
 	return im, nil
 }
 

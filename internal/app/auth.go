@@ -92,6 +92,7 @@ func (a *App) login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	http.SetCookie(w, &http.Cookie{Name: "tanoimg_session", Value: token, Path: "/", HttpOnly: true, SameSite: http.SameSiteLaxMode, Secure: r.TLS != nil || strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https"), Expires: expires})
+	a.enqueueNotification("login", "管理员登录", body.Username+" 已登录", map[string]any{"username": body.Username, "ip": a.clientIP(r)})
 	ok(w, map[string]any{"token": token, "user": map[string]string{"username": body.Username}})
 }
 

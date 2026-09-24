@@ -255,6 +255,7 @@ func (a *App) upload(w http.ResponseWriter, r *http.Request, public bool) {
 			return
 		}
 	}
+	a.enqueueNotification("upload", "图片上传", original+" 已上传", map[string]any{"id": im.ID, "filename": im.Filename, "url": im.URL, "size": im.Size, "ip": im.IP, "type": im.UploadedByType})
 	ok(w, im)
 }
 

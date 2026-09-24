@@ -350,3 +350,30 @@ func TestPublicUploadRespectsSameIPConcurrencySetting(t *testing.T) {
 		t.Fatalf("first upload: %d %s", completed.Code, completed.Body.String())
 	}
 }
+
+func TestEasyImgNotificationConfigAndWebhook(t *testing.T) {
+	a := testApp(t)
+	token := adminToken(t, a)
+	if got := adminRequest(a, "", http.MethodGet, "/api/notification", ""); got.Code != 401 {
+		t.Fatalf("anonymous notification config: %d", got.Code)
+	}
+	config := `{"enabled":true,"method":"webhook","types":{"login":true,"upload":true,"nsfw":true},"webhook":{"url":"https://hooks.example/notify","method":"POST","contentType":"application/json","headers":{"X-Test":"yes"},"bodyTemplate":"{\"kind\":\"{{type}}\",\"text\":\"{{message}}\"}"}}`
+	if got := adminRequest(a, token, http.MethodPut, "/api/notification", config); got.Code != 200 {
+		t.Fatalf("save notification config: %d %s", got.Code, got.Body.String())
+	}
+	if got := adminRequest(a, token, http.MethodGet, "/api/notification", ""); got.Code != 200 || !strings.Contains(got.Body.String(), `"method":"webhook"`) {
+		t.Fatalf("notification config: %d %s", got.Code, got.Body.String())
+	}
+	called := false
+	a.urlClient = &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		called = true
+		b, _ := io.ReadAll(r.Body)
+		if r.Header.Get("X-Test") != "yes" || !strings.Contains(string(b), `"kind":"test"`) {
+			t.Errorf("webhook request: %s %s", r.Header.Get("X-Test"), b)
+		}
+		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader("ok")), Request: r}, nil
+	})}
+	if got := adminRequest(a, token, http.MethodPost, "/api/notification/test", config); got.Code != 200 || !called {
+		t.Fatalf("test notification: %d %s", got.Code, got.Body.String())
+	}
+}

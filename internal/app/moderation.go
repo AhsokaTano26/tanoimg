@@ -127,6 +127,7 @@ func (a *App) processOneModeration(ctx context.Context) error {
 					}
 				}
 			}
+			a.enqueueNotification("nsfw", "内容审核完成", fmt.Sprintf("图片 %s 审核完成，违规：%t", filename, outcome.NSFW), map[string]any{"imageId": imageID, "filename": filename, "score": outcome.Score, "isNsfw": outcome.NSFW, "provider": config.Provider})
 			return nil
 		}
 	}

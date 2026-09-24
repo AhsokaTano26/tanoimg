@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"golang.org/x/crypto/bcrypt"
@@ -38,6 +39,11 @@ type App struct {
 	moderationDone   chan struct{}
 	publicMu         sync.Mutex
 	publicActive     map[string]bool
+	notifyOnce       sync.Once
+	notifyWake       chan struct{}
+	notifyCancel     func()
+	notifyDone       chan struct{}
+	notifyEnabled    atomic.Bool
 }
 
 type Image struct {
@@ -92,7 +98,7 @@ func New(c Config) (*App, error) {
 		return nil, err
 	}
 	db.SetMaxOpenConns(1)
-	a := &App{DB: db, DataDir: c.DataDir, limiter: make(chan struct{}, 4), waiters: make(chan struct{}, 32), TrustProxy: c.TrustProxy, urlClient: newURLClient(), moderationWake: make(chan struct{}, 1), publicActive: make(map[string]bool)}
+	a := &App{DB: db, DataDir: c.DataDir, limiter: make(chan struct{}, 4), waiters: make(chan struct{}, 32), TrustProxy: c.TrustProxy, urlClient: newURLClient(), moderationWake: make(chan struct{}, 1), publicActive: make(map[string]bool), notifyWake: make(chan struct{}, 1)}
 	for _, q := range []string{
 		`PRAGMA journal_mode=WAL`,
 		`CREATE TABLE IF NOT EXISTS images (id TEXT PRIMARY KEY, uuid TEXT NOT NULL UNIQUE, filename TEXT NOT NULL, original_name TEXT NOT NULL DEFAULT '', format TEXT NOT NULL, size INTEGER NOT NULL, width INTEGER NOT NULL DEFAULT 0, height INTEGER NOT NULL DEFAULT 0, uploaded_by TEXT NOT NULL DEFAULT '', uploaded_by_type TEXT NOT NULL DEFAULT 'private', uploaded_at TEXT NOT NULL, updated_at TEXT NOT NULL, is_deleted INTEGER NOT NULL DEFAULT 0, is_nsfw INTEGER NOT NULL DEFAULT 0)`,
@@ -106,6 +112,8 @@ func New(c Config) (*App, error) {
 		`CREATE TABLE IF NOT EXISTS source_documents (kind TEXT NOT NULL, id TEXT NOT NULL, doc TEXT NOT NULL, PRIMARY KEY(kind,id))`,
 		`CREATE TABLE IF NOT EXISTS moderation_tasks (id TEXT PRIMARY KEY, image_id TEXT NOT NULL, filename TEXT NOT NULL, status TEXT NOT NULL, retry_count INTEGER NOT NULL DEFAULT 0, next_attempt INTEGER NOT NULL DEFAULT 0, error TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL, updated_at TEXT NOT NULL)`,
 		`CREATE INDEX IF NOT EXISTS moderation_tasks_queue ON moderation_tasks(status,next_attempt,created_at)`,
+		`CREATE TABLE IF NOT EXISTS notification_events (id INTEGER PRIMARY KEY AUTOINCREMENT, kind TEXT NOT NULL, payload TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'pending', retry_count INTEGER NOT NULL DEFAULT 0, next_attempt INTEGER NOT NULL DEFAULT 0, error TEXT NOT NULL DEFAULT '')`,
+		`CREATE INDEX IF NOT EXISTS notification_events_queue ON notification_events(status,next_attempt,id)`,
 	} {
 		if _, err := db.Exec(q); err != nil {
 			db.Close()
@@ -144,6 +152,7 @@ func New(c Config) (*App, error) {
 			return nil, err
 		}
 	}
+	a.notifyEnabled.Store(a.notificationSettings().Enabled)
 	return a, nil
 }
 
@@ -187,6 +196,10 @@ func (a *App) Close() error {
 	if a.moderationCancel != nil {
 		a.moderationCancel()
 		<-a.moderationDone
+	}
+	if a.notifyCancel != nil {
+		a.notifyCancel()
+		<-a.notifyDone
 	}
 	return a.DB.Close()
 }

@@ -52,6 +52,7 @@ func main() {
 		log.Fatal("no administrator configured: set TANOIMG_ADMIN_PASSWORD or migrate EasyImg users.db")
 	}
 	a.StartModeration()
+	a.StartNotifications()
 	server := &http.Server{Addr: *addr, Handler: a.Handler(), ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 1 << 20}
 	log.Printf("TanoImg listening on %s; data=%s", *addr, *data)
 	log.Fatal(server.ListenAndServe())
