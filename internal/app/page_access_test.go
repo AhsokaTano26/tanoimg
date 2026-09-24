@@ -34,8 +34,10 @@ func TestPageAccessAndFrontendAssets(t *testing.T) {
 		got := httptest.NewRecorder()
 		a.Handler().ServeHTTP(got, httptest.NewRequest(http.MethodGet, "/assets/"+entry.Name(), nil))
 		kind := "javascript"
-        if strings.HasSuffix(entry.Name(), ".css") { kind = "text/css" }
-        if got.Code != 200 || !strings.Contains(got.Header().Get("Content-Type"), kind) {
+		if strings.HasSuffix(entry.Name(), ".css") {
+			kind = "text/css"
+		}
+		if got.Code != 200 || !strings.Contains(got.Header().Get("Content-Type"), kind) {
 			t.Fatalf("asset %s: %d %s", entry.Name(), got.Code, got.Header().Get("Content-Type"))
 		}
 	}

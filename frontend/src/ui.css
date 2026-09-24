@@ -166,3 +166,5 @@
 @media(prefers-reduced-motion:reduce){.page-enter-active,.page-leave-active{transition:none}.page-enter-from,.page-leave-to{transform:none}}
 .p-select-option.p-select-option-selected {background:var(--accent-soft);color:var(--primary)}
 .p-select-option:not(.p-select-option-selected).p-focus {background:var(--surface-hover);color:var(--text)}
+.ui-drawer .admin-navigation .nav-link {justify-content:flex-start;min-height:44px;border-radius:8px}
+.ui-drawer .admin-navigation .nav-link.active {border:1px solid color-mix(in srgb,var(--primary) 18%,transparent)}

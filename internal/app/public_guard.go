@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 )
 
@@ -114,7 +115,7 @@ func uploadVisibility(r *http.Request) (string, bool) {
 }
 func formatAllowed(formats []string, format string) bool {
 	for _, ext := range formats {
-		if ext == format || (format == "jpg" && ext == "jpeg") {
+		if strings.EqualFold(ext, format) || (format == "jpg" && strings.EqualFold(ext, "jpeg")) {
 			return true
 		}
 	}

@@ -27,7 +27,7 @@
 | 图片格式与转换 | JPEG、PNG、GIF、WebP、AVIF、SVG、BMP、ICO、APNG、TIFF 可直存；JPEG/PNG/WebP 可处理，GIF/APNG 动画保持原文件 |
 | 版本检查 | 管理员手动检查 TanoImg 的 GitHub 发布版本 |
 
-访客只看到公共图片页（`/`）和公共上传（`/upload`），通过 header 的登录入口进入后台。后台位于 `/admin/*`，包括图片管理、上传、回收站、统计、API 指南和设置，需管理员会话才能访问。Vue Router 的 `RouterLink` / `RouterView` 负责页面导航、刷新及浏览器前进后退；旧设置、统计和回收站链接仍会转到对应的受保护页面。旧 JWT 会话不会迁移；旧账户和 API Key 会迁移。
+访客只看到公共图片页（`/`）和图库上方的公共上传框（`/#public-upload`，旧 `/upload` 自动跳转），通过 header 的登录入口进入后台。后台位于 `/admin/*`，包括图片管理、上传、回收站、统计、API 指南和设置，需管理员会话才能访问。Vue Router 的 `RouterLink` / `RouterView` 负责页面导航、刷新及浏览器前进后退；旧设置、统计和回收站链接仍会转到对应的受保护页面。旧 JWT 会话不会迁移；旧账户和 API Key 会迁移。
 
 ## 快速启动
 
@@ -39,15 +39,29 @@ make build
 ./tanoimg serve -data ./data -addr :3000
 ```
 
-打开 `http://localhost:3000`。新安装默认关闭公开上传；管理员登录后可私有上传并在“管理”里开启公开上传。启动前必须设置管理员密码，系统不会创建默认弱密码。
+打开 `http://localhost:3000`。新安装默认关闭公开上传；管理员登录后可私有上传并在“公共上传”设置页开启公开上传。启动前必须设置管理员密码，系统不会创建默认弱密码。
 
-在“管理 → 外观设置”中，可以上传背景图片或填写 HTTPS 图片地址，拖动滑块预览模糊度后保存。上传的背景图片使用私有上传接口，保存后其直链会作为全站背景；“恢复默认背景”会清除背景和模糊度。外部图片由访客浏览器直接加载，建议使用自己控制的 HTTPS 图片源。
+在“外观与背景”中，可以从现有图库选择、上传背景图片或填写 HTTPS 图片地址，拖动滑块预览模糊度后保存。上传的背景图片使用私有上传接口，保存后其直链会作为全站背景；“恢复默认背景”会清除背景和模糊度。外部图片由访客浏览器直接加载，建议使用自己控制的 HTTPS 图片源。
 
 Docker：
 
 ```bash
 TANOIMG_ADMIN_PASSWORD='请换成强密码' docker compose up -d --build
 ```
+
+## 图库与上传体验
+
+- 图片右键或“更多”菜单可复制直链、HTML、Markdown、BBCode；管理员可设置全局背景、网站 Logo，或将图片移入回收站。
+- 管理员上传可选择私人／公开，默认私人。私人表示不出现在公共图库，已知直链仍可访问；“私人上传”中的兼容设置可以显式开放私人图片展示。
+- 访客在图库上方直接选择、拖放、粘贴图片或输入 URL 上传，无需切换页面。管理员文件和 URL 队列最多 4 路并发；访客队列逐张发送，遵守每 IP 限制。
+- 站点、外观、公共上传、私人上传、密钥、审核、通知、账户、黑名单、存储清理与版本均为独立后台页面。表单、下拉、复选框、菜单、弹窗与移动端抽屉统一封装 PrimeVue；图标使用本地 Lucide 图标库。
+- 允许格式通过复选框选择；页面切换有轻量过渡，遵循系统减少动态效果偏好。
+
+### 公共上传自动封禁
+
+在“公共上传”中配置启用状态、统计时间窗（1–1440 分钟）及最多请求次数（1–100000）。默认启用：每 IP 从首个请求开始的固定 10 分钟窗口内最多 120 次，**第 121 次自动加入 IP 黑名单**。文件和 URL 请求共用计数，失败、被限流的请求也计入；公开上传关闭时不计数。管理员／API Key 认证上传不受此策略限制。
+
+计数和黑名单持久化在 SQLite，重启不会清除。管理员可在“IP 黑名单”解除封禁，解除时同时重置该 IP 的频率及自动封禁计数。原有每分钟限流仍然独立生效，客户端应遵守 `Retry-After`，不要立即重复请求。
 
 ## 从 EasyImg 迁移
 
@@ -73,6 +87,7 @@ Docker 部署也可以用 `docker compose run --rm -v /path/to/easyimg:/old:ro t
 | `POST /api/auth/login` | JSON `username`、`password`；返回会话 token，并设置 HttpOnly Cookie |
 | `POST /api/upload/private` | `multipart/form-data`，字段 `file` 或 `image`；使用 `X-API-Key`、`?apiKey=` 或管理员会话 |
 | `POST /api/upload/public` | 公开上传开启后可用，表单字段同上 |
+| `POST /api/upload/public/url` | 访客 URL 上传，JSON `{"url":"https://…"}`；共用格式、大小、限流、封禁及审核策略 |
 | `POST /api/upload/url`、`POST /api/upload/urls` | 管理员或 API Key 上传远程图片；后者使用 SSE 返回进度 |
 | `GET /api/images?page=1&limit=20` | 分页图库；匿名用户只见公开图片 |
 | `GET /i/<uuid>.<格式>` | 图片直链 |
@@ -94,6 +109,8 @@ Docker 部署也可以用 `docker compose run --rm -v /path/to/easyimg:/old:ro t
 ```bash
 curl -H 'X-API-Key: sk-...' -F 'file=@photo.jpg' http://localhost:3000/api/upload/private
 ```
+
+认证上传的 `/api/upload/private`、`/api/upload/url`、`/api/upload/urls` 支持查询参数 `visibility=private`（默认）或 `visibility=public`。后台 `/admin/api` 提供完整参数说明、代码高亮示例和错误处理建议。远程导入只允许 HTTP(S)，阻止内网和本机地址。
 
 ## 批量上传与资源
 

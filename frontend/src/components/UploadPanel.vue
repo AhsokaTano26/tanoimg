@@ -14,12 +14,13 @@ const enabled=computed(()=>props.admin || config.value?.enabled);
 const busy=computed(()=>!!progress.value && (progress.value.active>0 || progress.value.pending>0));
 const endpoint=()=>props.admin ? '/api/upload/private?visibility='+visibility.value : '/api/upload/public';
 let disposed=false;
+function pause(ms,signal){return new Promise((resolve,reject)=>{const abort=()=>{clearTimeout(timer);reject(new DOMException("上传已取消","AbortError"));};const timer=setTimeout(()=>{signal.removeEventListener("abort",abort);resolve();},ms);signal.addEventListener("abort",abort,{once:true});if(signal.aborted)abort();});}
 async function upload(item,signal) {
   if(item.remote) return request((props.admin?'/api/upload/url?visibility='+item.visibility:'/api/upload/public/url'),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({url:item.url}),signal});
   for(let attempt=0;attempt<3;attempt++) {
     const body=new FormData();body.append('file',item.file);
     try { return await request(item.endpoint,{method:'POST',body,signal}); }
-    catch(error) { if(signal.aborted || ![429,502,503,504].includes(error.status) || attempt===2) throw error; await new Promise(resolve=>setTimeout(resolve,300*2**attempt)); }
+    catch(error) { if(signal.aborted || ![429,502,503,504].includes(error.status) || attempt===2) throw error; await pause(Math.max(error.retryAfterMs||0,300*2**attempt),signal); }
   }
 }
 const queue=createUploadQueue({

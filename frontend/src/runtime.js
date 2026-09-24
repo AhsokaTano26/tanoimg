@@ -24,6 +24,8 @@ export async function request(url, options = {}) {
     }
     const error = new Error(body.message || `请求失败 (${response.status})`);
     error.status = response.status;
+    const retryAfter=response.headers.get("Retry-After");
+    if(retryAfter){const seconds=Number(retryAfter);error.retryAfterMs=Number.isFinite(seconds)?Math.max(0,seconds*1000):Math.max(0,Date.parse(retryAfter)-Date.now())||0;}
     throw error;
   }
   return body.data;
