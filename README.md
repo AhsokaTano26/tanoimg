@@ -77,6 +77,8 @@ docker compose logs tanoimg
 
 ## 从 EasyImg 迁移
 
+迁移后部署到 Zeabur，请按 [Zeabur 迁移部署指南](docs/zeabur.md) 操作，包含数据转换、持久卷和上传切换流程。
+
 1. 停止 EasyImg 写入，并备份原有的 `db/` 与 `uploads/`。
 2. 执行迁移命令；`-from` 指向同时包含这两个目录的 EasyImg 根目录：
 
