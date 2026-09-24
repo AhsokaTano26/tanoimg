@@ -1,17 +1,21 @@
-FROM node:22-alpine AS frontend
+# syntax=docker/dockerfile:1
+FROM --platform=$BUILDPLATFORM node:22-alpine AS frontend
 WORKDIR /src/frontend
 COPY frontend/package.json frontend/package-lock.json ./
 RUN npm ci
 COPY frontend/ ./
 RUN npm run build
 
-FROM golang:1.26-alpine AS build
+FROM --platform=$BUILDPLATFORM golang:1.26-alpine AS build
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
 COPY --from=frontend /src/internal/app/web ./internal/app/web
-RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /tanoimg ./cmd/tanoimg
+ARG TARGETOS
+ARG TARGETARCH
+ARG VERSION=dev
+RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath -ldflags="-s -w -X main.version=$VERSION" -o /tanoimg ./cmd/tanoimg
 
 FROM alpine:3.22
 RUN addgroup -S tanoimg && adduser -S -G tanoimg tanoimg && mkdir /data && chown tanoimg:tanoimg /data

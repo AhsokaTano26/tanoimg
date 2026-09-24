@@ -7,3 +7,7 @@ tanoimg
 *.db-wal
 
 frontend/node_modules
+
+.env
+.env.*
+!.env.example
