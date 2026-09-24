@@ -34,19 +34,21 @@
 源码构建需要 Go 1.26、Node.js 22.12+ 和 npm，或使用 Docker。运行编译后的程序不需要 Node.js。
 
 ```bash
-export TANOIMG_ADMIN_PASSWORD='请换成强密码'
+# 可选：不设置或留空时，首次启动自动生成密码并输出到日志
+# export TANOIMG_ADMIN_PASSWORD='请换成强密码'
 make build
 ./tanoimg serve -data ./data -addr :3000
 ```
 
-打开 `http://localhost:3000`。新安装默认关闭公开上传；管理员登录后可私有上传并在“公共上传”设置页开启公开上传。启动前必须设置管理员密码，系统不会创建默认弱密码。
+打开 `http://localhost:3000`。新安装默认关闭公开上传；管理员登录后可私有上传并在“公共上传”设置页开启公开上传。首次初始化时，优先使用 `TANOIMG_ADMIN_PASSWORD`；未设置或为空时，自动生成 12 位密码（包含大小写字母、数字和特殊字符），在启动日志的 `initial administrator` 行查看。默认用户名为 `admin`，可通过 `TANOIMG_ADMIN_USER` 指定。已有账号不会在重启时被重置，随机密码只在创建时输出。
 
 在“外观与背景”中，可以从现有图库选择、上传背景图片或填写 HTTPS 图片地址，拖动滑块预览模糊度后保存。上传的背景图片使用私有上传接口，保存后其直链会作为全站背景；“恢复默认背景”会清除背景和模糊度。外部图片由访客浏览器直接加载，建议使用自己控制的 HTTPS 图片源。
 
 Docker 本地构建：
 
 ```bash
-TANOIMG_ADMIN_PASSWORD='请换成强密码' docker compose up -d --build
+docker compose up -d --build
+docker compose logs tanoimg
 ```
 
 ## Docker Hub 自动发布与部署
@@ -152,7 +154,7 @@ make build
 go test ./...
 ```
 
-`make build` 会在仓库根目录生成 `./tanoimg` 可执行文件；发布时可用 `make build VERSION=1.2.3` 注入版本号。运行时仍需设置 `TANOIMG_ADMIN_PASSWORD`，或使用已迁移的 EasyImg 管理员账户。
+`make build` 会在仓库根目录生成 `./tanoimg` 可执行文件；发布时可用 `make build VERSION=1.2.3` 注入版本号。首次运行可设置 `TANOIMG_ADMIN_PASSWORD`，不设置则自动生成密码并记录在启动日志中；已迁移的 EasyImg 管理员账户保留原密码。
 
 ### 前端开发
 

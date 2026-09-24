@@ -44,7 +44,7 @@ git push origin v1.2.3
 cd /opt/tanoimg
 cp .env.example .env
 chmod 600 .env
-# 编辑 .env：镜像、强密码、监听地址等
+# 编辑 .env：镜像、监听地址等；管理员密码可留空自动生成
 
 docker compose pull
 docker compose up -d
@@ -55,7 +55,7 @@ docker compose logs --tail=100 tanoimg
 
 ```dotenv
 TANOIMG_IMAGE=your-user/tanoimg:1.2.3
-TANOIMG_ADMIN_PASSWORD='替换为强密码'
+TANOIMG_ADMIN_PASSWORD=
 TANOIMG_BIND=127.0.0.1
 TANOIMG_PORT=3000
 TANOIMG_TRUST_PROXY=false
@@ -66,7 +66,8 @@ TANOIMG_PUBLIC_URL=https://img.example.com
 - 只有可信代理会覆盖转发头、且应用无法绕过代理访问时，才设置 `TANOIMG_TRUST_PROXY=true`，以正确识别公共上传 IP。
 - 需要直接访问时可设 `TANOIMG_BIND=0.0.0.0` 并配置防火墙；管理员登录建议使用 HTTPS。
 - 私有 Docker Hub 仓库需要先在服务器执行 `docker login`，使用有读取权限的 Token。
-- 管理员密码环境变量用于首次初始化，已有账号不会被该变量重置。
+- 首次初始化优先使用 `TANOIMG_ADMIN_PASSWORD`；未设置或留空时，使用密码学安全随机源生成 12 位密码，保证包含大小写字母、数字和特殊字符。通过 `docker compose logs tanoimg` 中的 `initial administrator` 行读取，默认用户名为 `admin`。
+- 自动密码仅在首次创建账号时输出；显式指定的密码不会写入日志。已有账号不会因重启或更换环境变量被重置。
 - Passkey 需要 `TANOIMG_PUBLIC_URL` 与浏览器实际 HTTPS 地址一致；留空可暂不启用，详见 [认证说明](authentication.md)。
 - `/data` 使用 Compose 命名卷，含 SQLite 数据库、认证加密密钥 `auth.key` 和图片。固定部署目录与 Compose 项目名，避免切换目录后创建另一个空卷。
 - `.env` 已排除出 Git 和 Docker 构建上下文。示例文件没有真实凭证。
