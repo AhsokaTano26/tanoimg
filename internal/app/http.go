@@ -94,6 +94,8 @@ func (a *App) page(w http.ResponseWriter, r *http.Request) {
 	case "/", "/login", "/gallery", "/recycle", "/settings", "/api", "/stats":
 	case "/app.css":
 		name = "app.css"
+	case "/icons.svg":
+		name = "icons.svg"
 	case "/app.js":
 		name = "app.js"
 	case "/upload-queue.mjs":
@@ -110,6 +112,8 @@ func (a *App) page(w http.ResponseWriter, r *http.Request) {
 	switch path.Ext(name) {
 	case ".html":
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	case ".svg":
+		w.Header().Set("Content-Type", "image/svg+xml")
 	case ".css":
 		w.Header().Set("Content-Type", "text/css; charset=utf-8")
 	case ".js", ".mjs":

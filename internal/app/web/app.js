@@ -4,11 +4,16 @@ const $ = (selector) => document.querySelector(selector);
 const state = { admin: false, page: 1, totalPages: 1, recyclePage: 1, recycleTotalPages: 1, publicEnabled: false, publicConfig: null, safetyProviders: {} };
 const selectedImages = new Set();
 
+function iconMarkup(name) {
+  return '<svg class="icon" aria-hidden="true"><use href="/icons.svg#' + name + '"></use></svg>';
+}
 function applyTheme(theme) {
   document.documentElement.dataset.theme = theme;
+  $('#theme-toggle').innerHTML = iconMarkup(theme === 'dark' ? 'sun' : 'moon');
+  $('meta[name="theme-color"]').content = theme === 'dark' ? '#0c0e12' : '#f4f5f7';
   $('#theme-toggle').setAttribute('aria-label', theme === 'dark' ? '切换浅色模式' : '切换深色模式');
 }
-applyTheme(localStorage.getItem('tanoimg-theme') === 'dark' ? 'dark' : 'light');
+applyTheme(document.documentElement.dataset.theme);
 
 function showAnnouncement(settings) {
   const announcement = settings.announcement;
@@ -26,7 +31,7 @@ function showAnnouncement(settings) {
 function applyLogo(url) {
   const mark = $('.brand-mark');
   mark.style.backgroundImage = imageCSS(url);
-  mark.textContent = url ? '' : 'T';
+  mark.innerHTML = url ? '' : iconMarkup('aperture');
 }
 function showModerationProvider() {
   const provider = $('#moderation-provider').value;
@@ -253,7 +258,7 @@ async function loadStatsView() {
 
 async function refreshAuth() {
   try { const auth = await api('/api/auth/verify'); state.admin = true; $('#admin-username').value = auth.user.username; } catch { state.admin = false; }
-  $('#account-btn').innerHTML = state.admin ? '退出登录 <span aria-hidden="true">↗</span>' : '管理员登录 <span aria-hidden="true">↗</span>';
+  $('#account-btn').textContent = state.admin ? '退出登录' : '管理员登录';
   $('#settings-locked').hidden = state.admin; $('#settings-content').hidden = !state.admin;
   $('#stats-locked').hidden = state.admin; $('#stats-content').hidden = !state.admin;
   $('#recycle-locked').hidden = state.admin; $('#recycle-content').hidden = !state.admin;
@@ -327,7 +332,7 @@ function showUploadResult(file, image, error, retryable = true) {
   if (image) {
     const preview = document.createElement('img'); preview.src = image.url; preview.alt = ''; preview.loading = 'lazy'; row.append(preview);
   } else {
-    const icon = document.createElement('span'); icon.className = 'upload-result-icon'; icon.textContent = '!'; row.append(icon);
+    const icon = document.createElement('span'); icon.className = 'upload-result-icon'; icon.innerHTML = iconMarkup('triangle-alert'); row.append(icon);
     if (retryable) failedFiles.push(file);
   }
   const info = document.createElement('div'); const title = document.createElement('strong'); title.textContent = file.name;
