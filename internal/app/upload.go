@@ -19,10 +19,12 @@ import (
 )
 
 type uploadConfig struct {
-	Enabled        bool     `json:"enabled"`
-	AllowedFormats []string `json:"allowedFormats"`
-	MaxFileSize    int64    `json:"maxFileSize"`
-	RateLimit      int      `json:"rateLimit"`
+	Enabled         bool                `json:"enabled"`
+	AllowedFormats  []string            `json:"allowedFormats"`
+	MaxFileSize     int64               `json:"maxFileSize"`
+	RateLimit       int                 `json:"rateLimit"`
+	AllowConcurrent bool                `json:"allowConcurrent"`
+	ContentSafety   contentSafetyConfig `json:"contentSafety"`
 }
 
 func publicConfig(a *App) uploadConfig {
@@ -132,6 +134,18 @@ func (a *App) upload(w http.ResponseWriter, r *http.Request, public bool) {
 			fail(w, 429, "公开上传过于频繁，请稍后重试")
 			return
 		}
+		if !c.AllowConcurrent {
+			ip := a.clientIP(r)
+			a.publicMu.Lock()
+			if a.publicActive[ip] {
+				a.publicMu.Unlock()
+				fail(w, 429, "请等待上一张图片上传完成")
+				return
+			}
+			a.publicActive[ip] = true
+			a.publicMu.Unlock()
+			defer func() { a.publicMu.Lock(); delete(a.publicActive, ip); a.publicMu.Unlock() }()
+		}
 	} else if a.userID(r) == "" && !a.hasAPIKey(r) {
 		fail(w, 401, "缺少有效的 API Key 或登录状态")
 		return
@@ -210,6 +224,12 @@ func (a *App) upload(w http.ResponseWriter, r *http.Request, public bool) {
 	im := Image{ID: id, UUID: uuid, Filename: filename, OriginalName: original, Format: format, Size: size, Width: width, Height: height, UploadedByType: kind, UploadedBy: "API用户", UploadedAt: now(), IP: a.clientIP(r)}
 	if public {
 		im.UploadedBy = "访客"
+		if publicConfig(a).ContentSafety.Enabled {
+			im.ModerationStatus = "pending"
+		} else {
+			im.ModerationStatus = "skipped"
+			im.ModerationChecked = true
+		}
 	} else if userID := a.userID(r); userID != "" {
 		a.DB.QueryRow(`SELECT username FROM users WHERE id=?`, userID).Scan(&im.UploadedBy)
 	} else {
@@ -226,6 +246,14 @@ func (a *App) upload(w http.ResponseWriter, r *http.Request, public bool) {
 		os.Remove(dest)
 		fail(w, 500, "保存图片记录失败")
 		return
+	}
+	if public && im.ModerationStatus == "pending" {
+		if err := a.enqueueModeration(im); err != nil {
+			a.DB.Exec(`DELETE FROM images WHERE id=?`, im.ID)
+			os.Remove(dest)
+			fail(w, 500, "创建审核任务失败")
+			return
+		}
 	}
 	ok(w, im)
 }

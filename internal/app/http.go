@@ -114,6 +114,7 @@ func (a *App) page(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *App) images(w http.ResponseWriter, r *http.Request) {
+	admin := a.userID(r) != ""
 	page, _ := strconv.Atoi(r.URL.Query().Get("page"))
 	if page < 1 {
 		page = 1
@@ -126,7 +127,7 @@ func (a *App) images(w http.ResponseWriter, r *http.Request) {
 		limit = 100
 	}
 	where := `is_deleted=0 AND is_nsfw=0`
-	if a.userID(r) == "" {
+	if !admin {
 		var cfg struct {
 			ShowOnHomepage bool `json:"showOnHomepage"`
 		}
@@ -146,14 +147,18 @@ func (a *App) images(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer rows.Close()
-	images := make([]Image, 0, limit)
+	images := make([]any, 0, limit)
 	for rows.Next() {
 		im, err := scanImage(rows)
 		if err != nil {
 			fail(w, 500, "查询图片失败")
 			return
 		}
-		images = append(images, im)
+		if admin {
+			images = append(images, im)
+		} else {
+			images = append(images, map[string]any{"id": im.ID, "uuid": im.UUID, "filename": im.Filename, "originalName": im.OriginalName, "format": im.Format, "size": im.Size, "width": im.Width, "height": im.Height, "url": im.URL, "uploadedBy": im.UploadedBy, "uploadedAt": im.UploadedAt})
+		}
 	}
 	if rows.Err() != nil {
 		fail(w, 500, "查询图片失败")
@@ -243,7 +248,7 @@ func mimeFor(format string) string {
 func (a *App) getPublicConfig(w http.ResponseWriter, r *http.Request) {
 	c := publicConfig(a)
 	if a.userID(r) == "" {
-		ok(w, map[string]any{"enabled": c.Enabled, "allowedFormats": c.AllowedFormats, "maxFileSize": c.MaxFileSize})
+		ok(w, map[string]any{"enabled": c.Enabled, "allowedFormats": c.AllowedFormats, "maxFileSize": c.MaxFileSize, "allowConcurrent": c.AllowConcurrent})
 		return
 	}
 	ok(w, a.setting("publicApiConfig", c))
@@ -265,9 +270,34 @@ func (a *App) putPublicConfig(w http.ResponseWriter, r *http.Request) {
 	for key, value := range patch {
 		merged[key] = value
 	}
+	if raw, present := patch["contentSafety"]; present {
+		var safety contentSafetyConfig
+		if json.Unmarshal(raw, &safety) != nil {
+			fail(w, 400, "审核配置无效")
+			return
+		}
+		if safety.Provider != "" && safety.Provider != "nsfwdet" && safety.Provider != "elysiatools" && safety.Provider != "nsfw_detector" {
+			fail(w, 400, "不支持的审核服务")
+			return
+		}
+		for _, provider := range safety.Providers {
+			if provider.Threshold < 0 || provider.Threshold > 1 {
+				fail(w, 400, "审核阈值无效")
+				return
+			}
+			for _, target := range []string{provider.APIURL, provider.UploadURL} {
+				if target != "" {
+					if _, err := parseRemoteURL(target); err != nil {
+						fail(w, 400, "审核服务地址无效")
+						return
+					}
+				}
+			}
+		}
+	}
 	b, _ := json.Marshal(merged)
 	var c uploadConfig
-	if json.Unmarshal(b, &c) != nil || c.MaxFileSize < 1 || c.MaxFileSize > 100<<20 || len(c.AllowedFormats) == 0 {
+	if json.Unmarshal(b, &c) != nil || c.MaxFileSize < 1 || c.MaxFileSize > 100<<20 || len(c.AllowedFormats) == 0 || c.RateLimit < 0 || c.RateLimit > 1000 {
 		fail(w, 400, "无效配置")
 		return
 	}

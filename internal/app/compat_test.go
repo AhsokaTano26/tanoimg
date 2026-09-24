@@ -2,19 +2,35 @@ package app
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"io"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 )
 
 type roundTripFunc func(*http.Request) (*http.Response, error)
 
 func (fn roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { return fn(r) }
+
+type gatedReader struct {
+	data    *bytes.Reader
+	started chan struct{}
+	release chan struct{}
+	once    sync.Once
+}
+
+func (g *gatedReader) Read(p []byte) (int, error) {
+	g.once.Do(func() { close(g.started) })
+	<-g.release
+	return g.data.Read(p)
+}
 
 func adminToken(t *testing.T, a *App) string {
 	t.Helper()
@@ -217,5 +233,120 @@ func TestMigrationPreservesModerationMetadataAndStats(t *testing.T) {
 	}
 	if got := adminRequest(a, token, http.MethodGet, "/api/settings/stats", ""); got.Code != 200 || !strings.Contains(got.Body.String(), `"moderatedImagesCount":1`) || !strings.Contains(got.Body.String(), `"nsfwImagesCount":1`) {
 		t.Fatalf("moderation stats: %d %s", got.Code, got.Body.String())
+	}
+}
+
+func TestEasyImgPublicModerationQueue(t *testing.T) {
+	a := testApp(t)
+	config := `{"enabled":true,"allowedFormats":["png"],"maxFileSize":1048576,"rateLimit":10,"contentSafety":{"enabled":true,"provider":"nsfwdet","autoBlacklistIp":true,"providers":{"nsfwdet":{"apiUrl":"https://moderator.example/check","apiKey":"test-key","threshold":0.5}}}}`
+	if err := a.setSetting("publicApiConfig", json.RawMessage(config)); err != nil {
+		t.Fatal(err)
+	}
+	a.urlClient = &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		if r.Method != http.MethodPost || r.Header.Get("X-API-Key") != "test-key" {
+			t.Errorf("moderation request: %s %s", r.Method, r.Header.Get("X-API-Key"))
+		}
+		return &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": []string{"application/json"}}, Body: io.NopCloser(strings.NewReader(`{"code":0,"result":{"nsfw":0.93}}`)), Request: r}, nil
+	})}
+	var body bytes.Buffer
+	form := multipart.NewWriter(&body)
+	file, _ := form.CreateFormFile("file", "photo.png")
+	file.Write(tinyPNG(t))
+	form.Close()
+	req := httptest.NewRequest(http.MethodPost, "/api/upload/public", &body)
+	req.Header.Set("Content-Type", form.FormDataContentType())
+	req.RemoteAddr = "192.0.2.10:1234"
+	rec := httptest.NewRecorder()
+	a.Handler().ServeHTTP(rec, req)
+	if rec.Code != 200 {
+		t.Fatalf("public upload: %d %s", rec.Code, rec.Body.String())
+	}
+	var pending int
+	if err := a.DB.QueryRow(`SELECT count(*) FROM moderation_tasks WHERE status='pending'`).Scan(&pending); err != nil || pending != 1 {
+		t.Fatalf("pending task: %d %v", pending, err)
+	}
+	if err := a.processOneModeration(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	var nsfw, checked bool
+	var score float64
+	if err := a.DB.QueryRow(`SELECT is_nsfw,moderation_checked,moderation_score FROM images LIMIT 1`).Scan(&nsfw, &checked, &score); err != nil || !nsfw || !checked || score != 0.93 {
+		t.Fatalf("moderation outcome: %t %t %.2f %v", nsfw, checked, score, err)
+	}
+	var blocked int
+	if err := a.DB.QueryRow(`SELECT count(*) FROM ip_blacklist WHERE ip='192.0.2.10'`).Scan(&blocked); err != nil || blocked != 1 {
+		t.Fatalf("auto blacklist: %d %v", blocked, err)
+	}
+}
+
+func TestModerationDefaultsToElysia(t *testing.T) {
+	a := testApp(t)
+	filename := "55555555-5555-4555-8555-555555555555.png"
+	imagePath := filepath.Join(a.DataDir, "uploads", filename)
+	if err := os.WriteFile(imagePath, tinyPNG(t), 0600); err != nil {
+		t.Fatal(err)
+	}
+	a.urlClient = &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		body := `{"filePath":"remote-image"}`
+		if strings.Contains(r.URL.Path, "/api/tools/") {
+			body = `{"data":{"data":{"isSafe":true},"confidence":99}}`
+		}
+		return &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": []string{"application/json"}}, Body: io.NopCloser(strings.NewReader(body)), Request: r}, nil
+	})}
+	outcome, err := a.moderateFile(context.Background(), imagePath, filename, contentSafetyConfig{Enabled: true})
+	if err != nil || outcome.NSFW {
+		t.Fatalf("default provider: %+v %v", outcome, err)
+	}
+}
+
+func TestPublicGalleryHidesSourceURL(t *testing.T) {
+	a := testApp(t)
+	im := fixtureImage(t, a, "66666666-6666-4666-8666-666666666666", false)
+	im.UploadedByType = "public"
+	im.SourceURL = "https://images.example/photo.png?token=secret"
+	if err := a.saveImage(im); err != nil {
+		t.Fatal(err)
+	}
+	got := adminRequest(a, "", http.MethodGet, "/api/images", "")
+	if got.Code != 200 || strings.Contains(got.Body.String(), "token=secret") {
+		t.Fatalf("public gallery leaked URL: %d %s", got.Code, got.Body.String())
+	}
+}
+
+func TestPublicConfigRejectsUnsupportedModerationProvider(t *testing.T) {
+	a := testApp(t)
+	token := adminToken(t, a)
+	got := adminRequest(a, token, http.MethodPut, "/api/config/public", `{"contentSafety":{"enabled":true,"provider":"unknown"}}`)
+	if got.Code != 400 {
+		t.Fatalf("unsupported provider accepted: %d %s", got.Code, got.Body.String())
+	}
+}
+
+func TestPublicUploadRespectsSameIPConcurrencySetting(t *testing.T) {
+	a := testApp(t)
+	a.setSetting("publicApiConfig", json.RawMessage(`{"enabled":true,"allowedFormats":["png"],"maxFileSize":1048576,"rateLimit":10,"allowConcurrent":false}`))
+	var body bytes.Buffer
+	form := multipart.NewWriter(&body)
+	file, _ := form.CreateFormFile("file", "photo.png")
+	file.Write(tinyPNG(t))
+	form.Close()
+	gated := &gatedReader{data: bytes.NewReader(body.Bytes()), started: make(chan struct{}), release: make(chan struct{})}
+	first := httptest.NewRequest(http.MethodPost, "/api/upload/public", gated)
+	first.Header.Set("Content-Type", form.FormDataContentType())
+	first.RemoteAddr = "192.0.2.55:1000"
+	firstDone := make(chan *httptest.ResponseRecorder, 1)
+	go func() { rec := httptest.NewRecorder(); a.Handler().ServeHTTP(rec, first); firstDone <- rec }()
+	<-gated.started
+	second := httptest.NewRequest(http.MethodPost, "/api/upload/public", bytes.NewReader(body.Bytes()))
+	second.Header.Set("Content-Type", form.FormDataContentType())
+	second.RemoteAddr = "192.0.2.55:2000"
+	rec := httptest.NewRecorder()
+	a.Handler().ServeHTTP(rec, second)
+	close(gated.release)
+	if rec.Code != 429 {
+		t.Fatalf("same IP concurrent upload: %d %s", rec.Code, rec.Body.String())
+	}
+	if completed := <-firstDone; completed.Code != 200 {
+		t.Fatalf("first upload: %d %s", completed.Code, completed.Body.String())
 	}
 }

@@ -133,6 +133,15 @@ func (a *App) MigrateEasyImg(root string) (MigrationReport, error) {
 					report.Images++
 				}
 			case "moderation_tasks":
+				created := str(doc["createdAt"])
+				if created == "" {
+					created = now()
+				}
+				status := str(doc["status"])
+				if status == "" {
+					status = "pending"
+				}
+				_, err = a.DB.Exec(`INSERT INTO moderation_tasks(id,image_id,filename,status,retry_count,error,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET image_id=excluded.image_id,filename=excluded.filename,status=excluded.status,retry_count=excluded.retry_count,error=excluded.error,updated_at=excluded.updated_at`, id, str(doc["imageId"]), str(doc["filename"]), status, intVal(doc["retryCount"]), str(doc["error"]), created, str(doc["updatedAt"]))
 				report.ModerationTasks++
 			case "ip_blacklist":
 				ip := str(doc["ip"])
@@ -190,6 +199,11 @@ func (a *App) removeMigratedDocument(kind, id string) error {
 		}
 	case "ip_blacklist":
 		_, err := a.DB.Exec(`DELETE FROM ip_blacklist WHERE id=?`, id)
+		if err != nil {
+			return err
+		}
+	case "moderation_tasks":
+		_, err := a.DB.Exec(`DELETE FROM moderation_tasks WHERE id=?`, id)
 		if err != nil {
 			return err
 		}
