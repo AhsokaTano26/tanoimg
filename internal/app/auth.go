@@ -166,3 +166,28 @@ func (a *App) changePassword(w http.ResponseWriter, r *http.Request) {
 	http.SetCookie(w, &http.Cookie{Name: "tanoimg_session", Value: "", Path: "/", MaxAge: -1, HttpOnly: true, SameSite: http.SameSiteLaxMode})
 	ok(w, nil)
 }
+
+func (a *App) changeUsername(w http.ResponseWriter, r *http.Request) {
+	id := a.userID(r)
+	if id == "" {
+		fail(w, 401, "请先登录")
+		return
+	}
+	var body struct {
+		Username string `json:"username"`
+	}
+	if json.NewDecoder(http.MaxBytesReader(w, r.Body, 8192)).Decode(&body) != nil {
+		fail(w, 400, "无效请求")
+		return
+	}
+	username := strings.TrimSpace(body.Username)
+	if len(username) < 3 || len(username) > 64 {
+		fail(w, 400, "用户名需要 3–64 位")
+		return
+	}
+	if _, err := a.DB.Exec(`UPDATE users SET username=? WHERE id=?`, username, id); err != nil {
+		fail(w, 400, "用户名已存在或无效")
+		return
+	}
+	ok(w, map[string]string{"username": username, "token": bearer(r)})
+}

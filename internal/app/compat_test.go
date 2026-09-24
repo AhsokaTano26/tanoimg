@@ -95,3 +95,55 @@ func TestEasyImgNSFWReviewAndPreview(t *testing.T) {
 		t.Fatalf("restored image: %d", got.Code)
 	}
 }
+
+func TestEasyImgSettingsAndPrivateConfig(t *testing.T) {
+	a := testApp(t)
+	token := adminToken(t, a)
+	if got := adminRequest(a, "", http.MethodGet, "/api/settings", ""); got.Code != 401 {
+		t.Fatalf("anonymous settings: %d", got.Code)
+	}
+	if got := adminRequest(a, token, http.MethodPut, "/api/settings", `{"appName":"Photo Vault","appLogo":"/i/logo.png","siteUrl":"https://photos.example/","announcement":{"enabled":true,"content":"Hello","displayType":"banner"}}`); got.Code != 200 {
+		t.Fatalf("settings update: %d %s", got.Code, got.Body.String())
+	}
+	if got := adminRequest(a, token, http.MethodGet, "/api/settings", ""); got.Code != 200 || !strings.Contains(got.Body.String(), `"siteUrl":"https://photos.example"`) {
+		t.Fatalf("settings read: %d %s", got.Code, got.Body.String())
+	}
+	if got := adminRequest(a, "", http.MethodGet, "/api/settings/public", ""); got.Code != 200 || !strings.Contains(got.Body.String(), `"appName":"Photo Vault"`) || strings.Contains(got.Body.String(), "siteUrl") {
+		t.Fatalf("public settings: %d %s", got.Code, got.Body.String())
+	}
+	if got := adminRequest(a, token, http.MethodPut, "/api/config/private", `{"maxFileSize":20971520,"showOnHomepage":true}`); got.Code != 200 {
+		t.Fatalf("private config update: %d %s", got.Code, got.Body.String())
+	}
+	if got := adminRequest(a, token, http.MethodGet, "/api/config/private", ""); got.Code != 200 || !strings.Contains(got.Body.String(), `"showOnHomepage":true`) {
+		t.Fatalf("private config read: %d %s", got.Code, got.Body.String())
+	}
+	if got := adminRequest(a, token, http.MethodPut, "/api/config/private", `{"maxFileSize":0}`); got.Code != 400 {
+		t.Fatalf("invalid private config: %d", got.Code)
+	}
+}
+
+func TestEasyImgUsernameAndAPIKeyUpdates(t *testing.T) {
+	a := testApp(t)
+	token := adminToken(t, a)
+	if got := adminRequest(a, token, http.MethodPut, "/api/admin/username", `{"username":"newadmin"}`); got.Code != 200 {
+		t.Fatalf("username update: %d %s", got.Code, got.Body.String())
+	}
+	if got := adminRequest(a, token, http.MethodGet, "/api/auth/verify", ""); got.Code != 200 || !strings.Contains(got.Body.String(), "newadmin") {
+		t.Fatalf("session after username change: %d %s", got.Code, got.Body.String())
+	}
+	if got := adminRequest(a, "", http.MethodPost, "/api/auth/login", `{"username":"newadmin","password":"strong-test-password"}`); got.Code != 200 {
+		t.Fatalf("new username login: %d %s", got.Code, got.Body.String())
+	}
+	if _, err := a.DB.Exec(`INSERT INTO apikeys(id,key,name,enabled,is_default,created_at) VALUES('key1','sk-old','Original',1,0,'')`); err != nil {
+		t.Fatal(err)
+	}
+	if got := adminRequest(a, token, http.MethodPut, "/api/apikeys/key1", `{"name":"Renamed","enabled":false,"regenerate":true}`); got.Code != 200 || !strings.Contains(got.Body.String(), `"name":"Renamed"`) || strings.Contains(got.Body.String(), `"key":"sk-old"`) {
+		t.Fatalf("key update: %d %s", got.Code, got.Body.String())
+	}
+	if got := adminRequest(a, token, http.MethodPut, "/api/apikeys/key1", `{"enabled":true}`); got.Code != 200 {
+		t.Fatalf("enable key: %d %s", got.Code, got.Body.String())
+	}
+	if got := adminRequest(a, token, http.MethodPut, "/api/apikeys/missing", `{"enabled":true}`); got.Code != 404 {
+		t.Fatalf("missing key: %d", got.Code)
+	}
+}

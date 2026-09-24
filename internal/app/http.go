@@ -38,6 +38,7 @@ func (a *App) Handler() http.Handler {
 	mux.HandleFunc("POST /api/auth/logout", a.logout)
 	mux.HandleFunc("GET /api/auth/verify", a.verify)
 	mux.HandleFunc("PUT /api/admin/password", a.changePassword)
+	mux.HandleFunc("PUT /api/admin/username", a.changeUsername)
 	mux.HandleFunc("POST /api/upload/public", func(w http.ResponseWriter, r *http.Request) { a.upload(w, r, true) })
 	mux.HandleFunc("POST /api/upload/private", func(w http.ResponseWriter, r *http.Request) { a.upload(w, r, false) })
 	mux.HandleFunc("GET /api/images", a.images)
@@ -50,11 +51,16 @@ func (a *App) Handler() http.Handler {
 	mux.HandleFunc("POST /api/settings/hard-delete", a.hardDeleteImages)
 	mux.HandleFunc("GET /api/config/public", a.getPublicConfig)
 	mux.HandleFunc("PUT /api/config/public", a.putPublicConfig)
+	mux.HandleFunc("GET /api/config/private", a.getPrivateConfig)
+	mux.HandleFunc("PUT /api/config/private", a.putPrivateConfig)
+	mux.HandleFunc("GET /api/settings", a.getSettings)
+	mux.HandleFunc("PUT /api/settings", a.putSettings)
 	mux.HandleFunc("GET /api/settings/public", a.publicSettings)
 	mux.HandleFunc("PUT /api/settings/appearance", a.putAppearanceSettings)
 	mux.HandleFunc("GET /api/settings/stats", a.stats)
 	mux.HandleFunc("GET /api/apikeys", a.apiKeys)
 	mux.HandleFunc("POST /api/apikeys", a.createAPIKey)
+	mux.HandleFunc("PUT /api/apikeys/{id}", a.updateAPIKey)
 	mux.HandleFunc("DELETE /api/apikeys/{id}", a.deleteAPIKey)
 	mux.HandleFunc("GET /api/blacklist", a.listBlacklist)
 	mux.HandleFunc("POST /api/blacklist", a.addBlacklist)
@@ -400,4 +406,50 @@ func (a *App) deleteAPIKey(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ok(w, nil)
+}
+
+func (a *App) updateAPIKey(w http.ResponseWriter, r *http.Request) {
+	if !a.requireAdmin(w, r) {
+		return
+	}
+	var body struct {
+		Name       *string `json:"name"`
+		Enabled    *bool   `json:"enabled"`
+		Regenerate bool    `json:"regenerate"`
+	}
+	if json.NewDecoder(http.MaxBytesReader(w, r.Body, 8192)).Decode(&body) != nil {
+		fail(w, 400, "无效请求")
+		return
+	}
+	var key, name, created string
+	var enabled, isDefault bool
+	id := r.PathValue("id")
+	if err := a.DB.QueryRow(`SELECT key,name,enabled,is_default,created_at FROM apikeys WHERE id=?`, id).Scan(&key, &name, &enabled, &isDefault, &created); err != nil {
+		fail(w, 404, "密钥不存在")
+		return
+	}
+	if body.Name != nil {
+		name = strings.TrimSpace(*body.Name)
+		if name == "" || len(name) > 100 {
+			fail(w, 400, "密钥名称无效")
+			return
+		}
+	}
+	if body.Enabled != nil {
+		enabled = *body.Enabled
+	}
+	if body.Regenerate {
+		b := make([]byte, 24)
+		if _, err := rand.Read(b); err != nil {
+			fail(w, 500, "重新生成密钥失败")
+			return
+		}
+		key = "sk-" + hex.EncodeToString(b)
+	}
+	updated := now()
+	if _, err := a.DB.Exec(`UPDATE apikeys SET key=?,name=?,enabled=? WHERE id=?`, key, name, enabled, id); err != nil {
+		fail(w, 500, "更新密钥失败")
+		return
+	}
+	ok(w, map[string]any{"id": id, "key": key, "name": name, "enabled": enabled, "isDefault": isDefault, "createdAt": created, "updatedAt": updated})
 }
