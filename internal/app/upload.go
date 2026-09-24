@@ -207,9 +207,18 @@ func (a *App) upload(w http.ResponseWriter, r *http.Request, public bool) {
 			return
 		}
 	}
-	im := Image{ID: id, UUID: uuid, Filename: filename, OriginalName: original, Format: format, Size: size, Width: width, Height: height, UploadedByType: kind, UploadedBy: "API用户", UploadedAt: now()}
+	im := Image{ID: id, UUID: uuid, Filename: filename, OriginalName: original, Format: format, Size: size, Width: width, Height: height, UploadedByType: kind, UploadedBy: "API用户", UploadedAt: now(), IP: a.clientIP(r)}
 	if public {
 		im.UploadedBy = "访客"
+	} else if userID := a.userID(r); userID != "" {
+		a.DB.QueryRow(`SELECT username FROM users WHERE id=?`, userID).Scan(&im.UploadedBy)
+	} else {
+		key := r.Header.Get("X-API-Key")
+		if key == "" {
+			key = r.URL.Query().Get("apiKey")
+		}
+		a.DB.QueryRow(`SELECT id,name FROM apikeys WHERE key=? AND enabled=1`, key).Scan(&im.APIKeyID, &im.UploadedBy)
+		im.UploadedByType = "apikey"
 	}
 	im.UpdatedAt = im.UploadedAt
 	im.URL = "/i/" + filename

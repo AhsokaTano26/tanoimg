@@ -99,7 +99,10 @@ func (a *App) MigrateEasyImg(root string) (MigrationReport, error) {
 					f.Close()
 					return report, fmt.Errorf("%s:%d: invalid image filename", path, line)
 				}
-				im := Image{ID: id, UUID: uuid, Filename: filename, OriginalName: str(doc["originalName"]), Format: str(doc["format"]), Size: intVal(doc["size"]), Width: int(intVal(doc["width"])), Height: int(intVal(doc["height"])), UploadedBy: str(doc["uploadedBy"]), UploadedByType: str(doc["uploadedByType"]), UploadedAt: str(doc["uploadedAt"]), UpdatedAt: str(doc["updatedAt"]), IsDeleted: boolVal(doc["isDeleted"]), IsNsfw: boolVal(doc["isNsfw"])}
+				im := Image{ID: id, UUID: uuid, Filename: filename, OriginalName: str(doc["originalName"]), Format: str(doc["format"]), Size: intVal(doc["size"]), Width: int(intVal(doc["width"])), Height: int(intVal(doc["height"])), UploadedBy: str(doc["uploadedBy"]), UploadedByType: str(doc["uploadedByType"]), UploadedAt: str(doc["uploadedAt"]), UpdatedAt: str(doc["updatedAt"]), IsDeleted: boolVal(doc["isDeleted"]), IsNsfw: boolVal(doc["isNsfw"]), ModerationChecked: boolVal(doc["moderationChecked"]), ModerationStatus: str(doc["moderationStatus"]), SourceURL: str(doc["sourceUrl"]), IP: str(doc["ip"]), APIKeyID: str(doc["apiKeyId"]), DeletedAt: str(doc["deletedAt"]), DeletedBy: str(doc["deletedBy"])}
+				var moderationResult map[string]json.RawMessage
+				json.Unmarshal(doc["moderationResult"], &moderationResult)
+				json.Unmarshal(moderationResult["score"], &im.ModerationScore)
 				if im.Format == "" {
 					im.Format = strings.TrimPrefix(filepath.Ext(filename), ".")
 				}

@@ -169,7 +169,7 @@ func (a *App) importRemoteImage(r *http.Request, raw, uploadedBy, uploadedByType
 	if original == "." || original == "/" || original == "" {
 		original = "image." + format
 	}
-	im := Image{ID: id, UUID: uuid, Filename: filename, OriginalName: original, Format: format, Size: size, Width: width, Height: height, UploadedBy: uploadedBy, UploadedByType: uploadedByType, UploadedAt: now()}
+	im := Image{ID: id, UUID: uuid, Filename: filename, OriginalName: original, Format: format, Size: size, Width: width, Height: height, UploadedBy: uploadedBy, UploadedByType: uploadedByType, UploadedAt: now(), SourceURL: raw, IP: a.clientIP(r)}
 	im.UpdatedAt = im.UploadedAt
 	im.URL = "/i/" + filename
 	if err := a.saveImage(im); err != nil {

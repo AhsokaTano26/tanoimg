@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"golang.org/x/crypto/bcrypt"
@@ -33,21 +34,29 @@ type App struct {
 }
 
 type Image struct {
-	ID             string `json:"id"`
-	UUID           string `json:"uuid"`
-	Filename       string `json:"filename"`
-	OriginalName   string `json:"originalName"`
-	Format         string `json:"format"`
-	Size           int64  `json:"size"`
-	Width          int    `json:"width"`
-	Height         int    `json:"height"`
-	UploadedBy     string `json:"uploadedBy"`
-	UploadedByType string `json:"uploadedByType"`
-	UploadedAt     string `json:"uploadedAt"`
-	UpdatedAt      string `json:"updatedAt"`
-	IsDeleted      bool   `json:"isDeleted"`
-	IsNsfw         bool   `json:"isNsfw"`
-	URL            string `json:"url"`
+	ID                string  `json:"id"`
+	UUID              string  `json:"uuid"`
+	Filename          string  `json:"filename"`
+	OriginalName      string  `json:"originalName"`
+	Format            string  `json:"format"`
+	Size              int64   `json:"size"`
+	Width             int     `json:"width"`
+	Height            int     `json:"height"`
+	UploadedBy        string  `json:"uploadedBy"`
+	UploadedByType    string  `json:"uploadedByType"`
+	UploadedAt        string  `json:"uploadedAt"`
+	UpdatedAt         string  `json:"updatedAt"`
+	IsDeleted         bool    `json:"isDeleted"`
+	IsNsfw            bool    `json:"isNsfw"`
+	ModerationChecked bool    `json:"moderationChecked"`
+	ModerationStatus  string  `json:"moderationStatus,omitempty"`
+	ModerationScore   float64 `json:"moderationScore,omitempty"`
+	SourceURL         string  `json:"sourceUrl,omitempty"`
+	IP                string  `json:"-"`
+	APIKeyID          string  `json:"-"`
+	DeletedAt         string  `json:"deletedAt,omitempty"`
+	DeletedBy         string  `json:"deletedBy,omitempty"`
+	URL               string  `json:"url"`
 }
 
 func newID() (string, error) {
@@ -94,6 +103,10 @@ func New(c Config) (*App, error) {
 			return nil, err
 		}
 	}
+	if err := ensureImageColumns(db); err != nil {
+		db.Close()
+		return nil, err
+	}
 	if err := os.Chmod(filepath.Join(c.DataDir, "tanoimg.db"), 0600); err != nil {
 		db.Close()
 		return nil, err
@@ -125,6 +138,42 @@ func New(c Config) (*App, error) {
 	return a, nil
 }
 
+func ensureImageColumns(db *sql.DB) error {
+	rows, err := db.Query(`PRAGMA table_info(images)`)
+	if err != nil {
+		return err
+	}
+	existing := make(map[string]bool)
+	for rows.Next() {
+		var cid, notnull, pk int
+		var name, kind string
+		var defaultValue sql.NullString
+		if err := rows.Scan(&cid, &name, &kind, &notnull, &defaultValue, &pk); err != nil {
+			rows.Close()
+			return err
+		}
+		existing[name] = true
+	}
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return err
+	}
+	for _, column := range []string{
+		"moderation_checked INTEGER NOT NULL DEFAULT 0", "moderation_status TEXT NOT NULL DEFAULT ''", "moderation_score REAL NOT NULL DEFAULT 0",
+		"source_url TEXT NOT NULL DEFAULT ''", "ip TEXT NOT NULL DEFAULT ''", "api_key_id TEXT NOT NULL DEFAULT ''",
+		"deleted_at TEXT NOT NULL DEFAULT ''", "deleted_by TEXT NOT NULL DEFAULT ''",
+	} {
+		name := strings.SplitN(column, " ", 2)[0]
+		if !existing[name] {
+			if _, err := db.Exec(`ALTER TABLE images ADD COLUMN ` + column); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
 func (a *App) Close() error { return a.DB.Close() }
 
 func (a *App) setting(key string, fallback any) json.RawMessage {
@@ -137,18 +186,18 @@ func (a *App) setting(key string, fallback any) json.RawMessage {
 }
 
 func (a *App) saveImage(im Image) error {
-	_, err := a.DB.Exec(`INSERT INTO images(id,uuid,filename,original_name,format,size,width,height,uploaded_by,uploaded_by_type,uploaded_at,updated_at,is_deleted,is_nsfw) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET uuid=excluded.uuid,filename=excluded.filename,original_name=excluded.original_name,format=excluded.format,size=excluded.size,width=excluded.width,height=excluded.height,uploaded_by=excluded.uploaded_by,uploaded_by_type=excluded.uploaded_by_type,uploaded_at=excluded.uploaded_at,updated_at=excluded.updated_at,is_deleted=excluded.is_deleted,is_nsfw=excluded.is_nsfw`, im.ID, im.UUID, im.Filename, im.OriginalName, im.Format, im.Size, im.Width, im.Height, im.UploadedBy, im.UploadedByType, im.UploadedAt, im.UpdatedAt, im.IsDeleted, im.IsNsfw)
+	_, err := a.DB.Exec(`INSERT INTO images(id,uuid,filename,original_name,format,size,width,height,uploaded_by,uploaded_by_type,uploaded_at,updated_at,is_deleted,is_nsfw,moderation_checked,moderation_status,moderation_score,source_url,ip,api_key_id,deleted_at,deleted_by) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET uuid=excluded.uuid,filename=excluded.filename,original_name=excluded.original_name,format=excluded.format,size=excluded.size,width=excluded.width,height=excluded.height,uploaded_by=excluded.uploaded_by,uploaded_by_type=excluded.uploaded_by_type,uploaded_at=excluded.uploaded_at,updated_at=excluded.updated_at,is_deleted=excluded.is_deleted,is_nsfw=excluded.is_nsfw,moderation_checked=excluded.moderation_checked,moderation_status=excluded.moderation_status,moderation_score=excluded.moderation_score,source_url=excluded.source_url,ip=excluded.ip,api_key_id=excluded.api_key_id,deleted_at=excluded.deleted_at,deleted_by=excluded.deleted_by`, im.ID, im.UUID, im.Filename, im.OriginalName, im.Format, im.Size, im.Width, im.Height, im.UploadedBy, im.UploadedByType, im.UploadedAt, im.UpdatedAt, im.IsDeleted, im.IsNsfw, im.ModerationChecked, im.ModerationStatus, im.ModerationScore, im.SourceURL, im.IP, im.APIKeyID, im.DeletedAt, im.DeletedBy)
 	return err
 }
 
 func scanImage(rows *sql.Rows) (Image, error) {
 	var im Image
-	err := rows.Scan(&im.ID, &im.UUID, &im.Filename, &im.OriginalName, &im.Format, &im.Size, &im.Width, &im.Height, &im.UploadedBy, &im.UploadedByType, &im.UploadedAt, &im.UpdatedAt, &im.IsDeleted, &im.IsNsfw)
+	err := rows.Scan(&im.ID, &im.UUID, &im.Filename, &im.OriginalName, &im.Format, &im.Size, &im.Width, &im.Height, &im.UploadedBy, &im.UploadedByType, &im.UploadedAt, &im.UpdatedAt, &im.IsDeleted, &im.IsNsfw, &im.ModerationChecked, &im.ModerationStatus, &im.ModerationScore, &im.SourceURL, &im.IP, &im.APIKeyID, &im.DeletedAt, &im.DeletedBy)
 	im.URL = "/i/" + im.Filename
 	return im, err
 }
 
-const imageColumns = `id,uuid,filename,original_name,format,size,width,height,uploaded_by,uploaded_by_type,uploaded_at,updated_at,is_deleted,is_nsfw`
+const imageColumns = `id,uuid,filename,original_name,format,size,width,height,uploaded_by,uploaded_by_type,uploaded_at,updated_at,is_deleted,is_nsfw,moderation_checked,moderation_status,moderation_score,source_url,ip,api_key_id,deleted_at,deleted_by`
 
 func (a *App) getImageByUUID(uuid string) (Image, error) {
 	rows, err := a.DB.Query(`SELECT `+imageColumns+` FROM images WHERE uuid=?`, uuid)

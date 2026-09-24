@@ -331,14 +331,18 @@ func (a *App) stats(w http.ResponseWriter, r *http.Request) {
 	if !a.requireAdmin(w, r) {
 		return
 	}
-	var total, public, private, deleted int
+	var total, public, private, deleted, nsfw, moderated int
 	var activeSize, deletedSize int64
-	err := a.DB.QueryRow(`SELECT coalesce(sum(CASE WHEN is_deleted=0 THEN 1 ELSE 0 END),0),coalesce(sum(CASE WHEN is_deleted=0 AND uploaded_by_type='public' THEN 1 ELSE 0 END),0),coalesce(sum(CASE WHEN is_deleted=0 AND uploaded_by_type!='public' THEN 1 ELSE 0 END),0),coalesce(sum(is_deleted),0),coalesce(sum(CASE WHEN is_deleted=0 THEN size ELSE 0 END),0),coalesce(sum(CASE WHEN is_deleted=1 THEN size ELSE 0 END),0) FROM images`).Scan(&total, &public, &private, &deleted, &activeSize, &deletedSize)
+	err := a.DB.QueryRow(`SELECT coalesce(sum(CASE WHEN is_deleted=0 THEN 1 ELSE 0 END),0),coalesce(sum(CASE WHEN is_deleted=0 AND uploaded_by_type='public' THEN 1 ELSE 0 END),0),coalesce(sum(CASE WHEN is_deleted=0 AND uploaded_by_type!='public' THEN 1 ELSE 0 END),0),coalesce(sum(is_deleted),0),coalesce(sum(CASE WHEN is_deleted=0 THEN size ELSE 0 END),0),coalesce(sum(CASE WHEN is_deleted=1 THEN size ELSE 0 END),0),coalesce(sum(is_nsfw),0),coalesce(sum(moderation_checked),0) FROM images`).Scan(&total, &public, &private, &deleted, &activeSize, &deletedSize, &nsfw, &moderated)
 	if err != nil {
 		fail(w, 500, "读取统计失败")
 		return
 	}
-	ok(w, map[string]any{"totalImages": total, "publicImages": public, "privateImages": private, "deletedImagesCount": deleted, "activeSize": activeSize, "deletedSize": deletedSize, "totalSize": activeSize + deletedSize})
+	rate := 0.0
+	if moderated > 0 {
+		rate = float64(nsfw) * 100 / float64(moderated)
+	}
+	ok(w, map[string]any{"totalImages": total, "publicImages": public, "privateImages": private, "deletedImagesCount": deleted, "activeSize": activeSize, "deletedSize": deletedSize, "totalSize": activeSize + deletedSize, "nsfwImagesCount": nsfw, "moderatedImagesCount": moderated, "nsfwRate": rate})
 }
 
 func (a *App) apiKeys(w http.ResponseWriter, r *http.Request) {

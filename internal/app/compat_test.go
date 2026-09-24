@@ -190,3 +190,32 @@ func TestEasyImgURLUploadSSE(t *testing.T) {
 		t.Fatalf("SSE: %d %s", got.Code, got.Body.String())
 	}
 }
+
+func TestMigrationPreservesModerationMetadataAndStats(t *testing.T) {
+	old := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(old, "db"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(old, "uploads"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	name := "44444444-4444-4444-8444-444444444444.png"
+	if err := os.WriteFile(filepath.Join(old, "uploads", name), tinyPNG(t), 0600); err != nil {
+		t.Fatal(err)
+	}
+	doc := `{"_id":"moderated","uuid":"44444444-4444-4444-8444-444444444444","filename":"` + name + `","format":"png","size":100,"uploadedByType":"public","isNsfw":true,"moderationChecked":true,"moderationStatus":"completed","moderationResult":{"score":0.94},"ip":"192.0.2.10"}` + "\n"
+	if err := os.WriteFile(filepath.Join(old, "db", "images.db"), []byte(doc), 0600); err != nil {
+		t.Fatal(err)
+	}
+	a := testApp(t)
+	if _, err := a.MigrateEasyImg(old); err != nil {
+		t.Fatal(err)
+	}
+	token := adminToken(t, a)
+	if got := adminRequest(a, token, http.MethodGet, "/api/images/nsfw", ""); got.Code != 200 || !strings.Contains(got.Body.String(), `"moderationScore":0.94`) || !strings.Contains(got.Body.String(), `"moderationStatus":"completed"`) {
+		t.Fatalf("moderation metadata: %d %s", got.Code, got.Body.String())
+	}
+	if got := adminRequest(a, token, http.MethodGet, "/api/settings/stats", ""); got.Code != 200 || !strings.Contains(got.Body.String(), `"moderatedImagesCount":1`) || !strings.Contains(got.Body.String(), `"nsfwImagesCount":1`) {
+		t.Fatalf("moderation stats: %d %s", got.Code, got.Body.String())
+	}
+}
