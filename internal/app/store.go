@@ -9,6 +9,8 @@ import (
 	"errors"
 	"fmt"
 	"github.com/go-webauthn/webauthn/webauthn"
+	"log"
+	"math/big"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -26,8 +28,10 @@ type Config struct {
 	Version       string
 	AdminUsername string
 	AdminPassword string
-	TrustProxy    bool
-	PublicURL     string
+	// InitializeAdmin creates an administrator on a fresh serving instance, never during migration.
+	InitializeAdmin bool
+	TrustProxy      bool
+	PublicURL       string
 }
 
 type App struct {
@@ -142,12 +146,24 @@ func New(c Config) (*App, error) {
 		db.Close()
 		return nil, err
 	}
+	if err := a.initSecurity(c.PublicURL); err != nil {
+		db.Close()
+		return nil, err
+	}
 	var count int
 	if err := db.QueryRow(`SELECT count(*) FROM users`).Scan(&count); err != nil {
 		db.Close()
 		return nil, err
 	}
-	if count == 0 && c.AdminPassword != "" {
+	if count == 0 && (c.InitializeAdmin || c.AdminPassword != "") {
+		generated := c.AdminPassword == ""
+		if generated {
+			c.AdminPassword, err = generateInitialPassword()
+			if err != nil {
+				db.Close()
+				return nil, err
+			}
+		}
 		if c.AdminUsername == "" {
 			c.AdminUsername = "admin"
 		}
@@ -165,10 +181,9 @@ func New(c Config) (*App, error) {
 			db.Close()
 			return nil, err
 		}
-	}
-	if err := a.initSecurity(c.PublicURL); err != nil {
-		db.Close()
-		return nil, err
+		if generated {
+			log.Printf("initial administrator: username=%q password=%s", c.AdminUsername, c.AdminPassword)
+		}
 	}
 	a.notifyEnabled.Store(a.notificationSettings().Enabled)
 	return a, nil
@@ -266,3 +281,33 @@ func (a *App) setSetting(key string, value json.RawMessage) error {
 }
 
 func now() string { return time.Now().UTC().Format(time.RFC3339Nano) }
+
+// Rejection sampling keeps all accepted 12-character passwords equally likely.
+func generateInitialPassword() (string, error) {
+	const alphabet = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%*-_+=?"
+	for {
+		password := make([]byte, 12)
+		var classes uint8
+		for i := range password {
+			n, err := rand.Int(rand.Reader, big.NewInt(int64(len(alphabet))))
+			if err != nil {
+				return "", err
+			}
+			c := alphabet[n.Int64()]
+			password[i] = c
+			switch {
+			case c >= 'a' && c <= 'z':
+				classes |= 1
+			case c >= 'A' && c <= 'Z':
+				classes |= 2
+			case c >= '0' && c <= '9':
+				classes |= 4
+			default:
+				classes |= 8
+			}
+		}
+		if classes == 15 {
+			return string(password), nil
+		}
+	}
+}

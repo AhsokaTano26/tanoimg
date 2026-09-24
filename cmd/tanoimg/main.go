@@ -41,18 +41,11 @@ func main() {
 		fmt.Println(string(b))
 		return
 	}
-	a, err := app.New(app.Config{DataDir: *data, Version: version, AdminUsername: env("TANOIMG_ADMIN_USER", "admin"), AdminPassword: os.Getenv("TANOIMG_ADMIN_PASSWORD"), TrustProxy: os.Getenv("TANOIMG_TRUST_PROXY") == "true", PublicURL: os.Getenv("TANOIMG_PUBLIC_URL")})
+	a, err := app.New(app.Config{DataDir: *data, Version: version, InitializeAdmin: true, AdminUsername: env("TANOIMG_ADMIN_USER", "admin"), AdminPassword: os.Getenv("TANOIMG_ADMIN_PASSWORD"), TrustProxy: os.Getenv("TANOIMG_TRUST_PROXY") == "true", PublicURL: os.Getenv("TANOIMG_PUBLIC_URL")})
 	if err != nil {
 		log.Fatal(err)
 	}
 	defer a.Close()
-	var users int
-	if err := a.DB.QueryRow(`SELECT count(*) FROM users`).Scan(&users); err != nil {
-		log.Fatal(err)
-	}
-	if users == 0 {
-		log.Fatal("no administrator configured: set TANOIMG_ADMIN_PASSWORD or migrate EasyImg users.db")
-	}
 	a.StartModeration()
 	a.StartNotifications()
 	server := &http.Server{Addr: *addr, Handler: a.Handler(), ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 1 << 20}
