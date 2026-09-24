@@ -45,3 +45,9 @@ python3 tools/loadtest/run.py --sides 724 --concurrency 16,64,256 --workload dow
 - 读取测试的服务进程内存峰值包含准备 1000 张图片阶段。下载重复同一文件，属于热缓存上界，不代表整个图库的冷读性能。
 
 闭环测试有客户端数上限，不测无限制开放到达率；“峰值”只针对所测工作负载和并发范围。没有模拟公网 TLS、代理、远程盘、长时间稳态、多人共享宿主机等条件。容器使用 Docker 虚拟机的本地匿名卷，非 macOS bind mount，也非 Zeabur 实际机器。
+
+## 科研图表
+
+运行 `plot_results.py` 可从已归档的 JSONL 生成性能图表，不会启动服务或重新压测。
+依赖单独保存在 `requirements-plot.txt`，不影响压测脚本的标准库运行方式。
+安装、字体参数、PNG/PDF 图表和结果分析见根目录 [性能测试报告](../../PERFORMANCE.md#图表复现与字体)。
