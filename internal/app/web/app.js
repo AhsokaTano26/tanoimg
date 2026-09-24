@@ -1,7 +1,7 @@
 import { createUploadQueue } from './upload-queue.mjs';
 
 const $ = (selector) => document.querySelector(selector);
-const state = { admin: false, page: 1, totalPages: 1, publicEnabled: false, publicConfig: null };
+const state = { admin: false, page: 1, totalPages: 1, publicEnabled: false, publicConfig: null, safetyProviders: {} };
 const selectedImages = new Set();
 
 function applyTheme(theme) {
@@ -27,6 +27,16 @@ function applyLogo(url) {
   const mark = $('.brand-mark');
   mark.style.backgroundImage = imageCSS(url);
   mark.textContent = url ? '' : 'T';
+}
+function showModerationProvider() {
+  const provider = $('#moderation-provider').value;
+  const config = state.safetyProviders[provider] || {};
+  $('#moderation-url').value = config.apiUrl || '';
+  $('#moderation-upload-url').value = config.uploadUrl || '';
+  $('#moderation-key').value = config.apiKey || '';
+  $('#moderation-threshold').value = config.threshold ?? (provider === 'nsfw_detector' ? 0.8 : 0.5);
+  $('#moderation-upload-url').parentElement.hidden = provider !== 'elysiatools';
+  $('#moderation-threshold').parentElement.hidden = provider === 'elysiatools';
 }
 
 function updateUploadHint() {
@@ -168,6 +178,10 @@ async function loadSettings() {
     $('#stat-total').textContent = stats.totalImages; $('#stat-public').textContent = stats.publicImages;
     $('#stat-private').textContent = stats.privateImages; $('#stat-size').textContent = `${(stats.activeSize / 1048576).toFixed(1)} MB`;
     $('#public-enabled').checked = config.enabled; $('#public-max').value = Math.round(config.maxFileSize / 1048576);
+    $('#public-formats').value = (config.allowedFormats || []).join(','); $('#public-rate').value = config.rateLimit || 10; $('#public-concurrent').checked = !!config.allowConcurrent;
+    $('#moderation-enabled').checked = !!config.contentSafety?.enabled; $('#moderation-provider').value = config.contentSafety?.provider || 'elysiatools'; $('#moderation-blacklist').checked = !!config.contentSafety?.autoBlacklistIp;
+    state.safetyProviders = structuredClone(config.contentSafety?.providers || {}); showModerationProvider();
+    $('#moderation-stats').textContent = `${stats.moderatedImagesCount || 0} 张已检测 · ${stats.nsfwImagesCount || 0} 张违规`;
     const list = $('#key-list'); list.replaceChildren();
     keys.forEach(key => {
       const row = document.createElement('div'); row.className = 'key-row';
@@ -287,7 +301,19 @@ $('#prev-page').addEventListener('click',()=>{if(state.page>1){state.page--;load
 $('#next-page').addEventListener('click',()=>{if(state.page<state.totalPages){state.page++;loadGallery();}});
 $('#save-public').addEventListener('click',async()=>{
   const size = Number($('#public-max').value); if (!Number.isInteger(size)||size<1||size>100) { toast('文件上限需为 1–100 MB'); return; }
-  try { await api('/api/config/public',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({enabled:$('#public-enabled').checked,maxFileSize:size*1048576,allowedFormats:['jpg','jpeg','png','gif','webp'],rateLimit:10})}); state.publicEnabled=$('#public-enabled').checked; state.publicConfig = { enabled: state.publicEnabled, maxFileSize: size * 1048576, allowedFormats: ['jpg','jpeg','png','gif','webp'] }; updateUploadHint(); toast('设置已保存'); } catch(error){toast(error.message);}
+  const formats = [...new Set($('#public-formats').value.split(',').map(x=>x.trim().toLowerCase()).filter(Boolean))];
+  const rateLimit = Number($('#public-rate').value);
+  if (!formats.length || !Number.isInteger(rateLimit) || rateLimit<1 || rateLimit>1000) { toast('请输入有效的格式和上传频率'); return; }
+  try { await api('/api/config/public',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({enabled:$('#public-enabled').checked,maxFileSize:size*1048576,allowedFormats:formats,rateLimit,allowConcurrent:$('#public-concurrent').checked})}); state.publicEnabled=$('#public-enabled').checked; state.publicConfig = { enabled: state.publicEnabled, maxFileSize: size * 1048576, allowedFormats: formats }; updateUploadHint(); toast('公开上传设置已保存'); } catch(error){toast(error.message);}
+});
+$('#moderation-provider').addEventListener('change', showModerationProvider);
+$('#moderation-form').addEventListener('submit', async event => {
+  event.preventDefault(); const provider = $('#moderation-provider').value;
+  const threshold = Number($('#moderation-threshold').value);
+  if (!Number.isFinite(threshold) || threshold<0 || threshold>1) {toast('审核阈值需在 0–1 之间');return;}
+  state.safetyProviders[provider] = {apiUrl:$('#moderation-url').value.trim(),uploadUrl:$('#moderation-upload-url').value.trim(),apiKey:$('#moderation-key').value.trim(),threshold};
+  const contentSafety = {enabled:$('#moderation-enabled').checked,provider,autoBlacklistIp:$('#moderation-blacklist').checked,providers:state.safetyProviders};
+  try { await api('/api/config/public',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({contentSafety})}); toast('审核设置已保存'); } catch(error){toast(error.message);}
 });
 $('#site-form').addEventListener('submit', async event => { event.preventDefault(); const body = {appName:$('#site-name').value.trim(), appLogo:$('#site-logo').value.trim(), siteUrl:$('#site-url').value.trim(), announcement:{enabled:$('#announcement-enabled').checked, content:$('#announcement-content').value, displayType:$('#announcement-type').value}}; try { const saved = await api('/api/settings', {method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)}); $('#brand-name').textContent = saved.appName; document.title = `${saved.appName} · 图片存储`; applyLogo(saved.appLogo); showAnnouncement(saved); toast('站点信息已保存'); } catch(error){toast(error.message);} });
 $('#private-form').addEventListener('submit', async event => { event.preventDefault(); const size = Number($('#private-max').value); if (!Number.isInteger(size) || size<1 || size>200) {toast('文件上限需为 1–200 MB');return;} try { await api('/api/config/private', {method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify({maxFileSize:size*1048576,showOnHomepage:$('#private-homepage').checked})}); toast('私有上传设置已保存'); await loadGallery(); } catch(error){toast(error.message);} });
