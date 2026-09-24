@@ -197,7 +197,7 @@ async function refreshAuth() {
 async function loadSettings() {
   await refreshAuth(); if (!state.admin) return;
   try {
-    const [stats, config, keys, blacklist, appearance, privateConfig, nsfw, notification] = await Promise.all([api('/api/settings/stats'), api('/api/config/public'), api('/api/apikeys'), api('/api/blacklist?limit=100'), api('/api/settings'), api('/api/config/private'), api('/api/images/nsfw?limit=20'), api('/api/notification')]);
+    const [stats, config, keys, blacklist, appearance, privateConfig, nsfw, notification, recycle] = await Promise.all([api('/api/settings/stats'), api('/api/config/public'), api('/api/apikeys'), api('/api/blacklist?limit=100'), api('/api/settings'), api('/api/config/private'), api('/api/images/nsfw?limit=20'), api('/api/notification'), api('/api/images/deleted?limit=100')]);
     fillAppearance(appearance);
     $('#site-name').value = appearance.appName || 'TanoImg'; $('#site-logo').value = appearance.appLogo || ''; $('#site-url').value = appearance.siteUrl || '';
     $('#announcement-enabled').checked = !!appearance.announcement?.enabled; $('#announcement-content').value = appearance.announcement?.content || ''; $('#announcement-type').value = appearance.announcement?.displayType || 'modal';
@@ -228,6 +228,9 @@ async function loadSettings() {
     const unsafe = $('#nsfw-list'); unsafe.replaceChildren();
     if (!nsfw.images.length) { const note = document.createElement('p'); note.textContent = '没有违规图片。'; unsafe.append(note); }
     nsfw.images.forEach(image => { const row = document.createElement('div'); row.className = 'key-row'; const name = document.createElement('strong'); name.textContent = image.originalName || image.filename; const preview = document.createElement('button'); preview.textContent = '预览'; preview.onclick = () => { $('#image-detail').src = image.url; $('#image-detail-meta').textContent = image.originalName || image.filename; $('#image-dialog').showModal(); }; const restore = document.createElement('button'); restore.textContent = '取消违规'; restore.onclick = async () => { try { await api(`/api/images/${encodeURIComponent(image.id)}/unmark-nsfw`, {method:'PUT'}); await loadSettings(); await loadGallery(); } catch(error){toast(error.message);} }; const actions = document.createElement('div'); actions.className = 'row-actions'; actions.append(preview, restore); row.append(name, actions); unsafe.append(row); });
+    const recycled = $('#recycle-list'); recycled.replaceChildren();
+    if (!recycle.images.length) { const note = document.createElement('p'); note.textContent = '回收站为空。'; recycled.append(note); }
+    recycle.images.forEach(image => { const row = document.createElement('div'); row.className = 'key-row'; const name = document.createElement('strong'); name.textContent = image.originalName || image.filename; const preview = document.createElement('button'); preview.textContent = '预览'; preview.onclick = () => { $('#image-detail').src = image.url; $('#image-detail-meta').textContent = image.originalName || image.filename; $('#image-dialog').showModal(); }; const restore = document.createElement('button'); restore.textContent = '恢复'; restore.onclick = async () => { try { await api(`/api/images/${encodeURIComponent(image.id)}/restore`, {method:'PUT'}); await loadSettings(); await loadGallery(); toast('图片已恢复'); } catch(error){toast(error.message);} }; const actions = document.createElement('div'); actions.className = 'row-actions'; actions.append(preview, restore); row.append(name, actions); recycled.append(row); });
     const blocked = $('#blacklist-list'); blocked.replaceChildren();
     blacklist.records.forEach(record => {
       const row = document.createElement('div'); row.className = 'key-row';

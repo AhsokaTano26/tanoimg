@@ -62,6 +62,56 @@ func pageParams(r *http.Request) (int, int) {
 	return page, limit
 }
 
+func (a *App) deletedImages(w http.ResponseWriter, r *http.Request) {
+	if !a.requireAdmin(w, r) {
+		return
+	}
+	page, limit := pageParams(r)
+	var total int
+	if err := a.DB.QueryRow(`SELECT count(*) FROM images WHERE is_deleted=1 AND is_nsfw=0`).Scan(&total); err != nil {
+		fail(w, 500, "查询回收站失败")
+		return
+	}
+	rows, err := a.DB.Query(`SELECT `+imageColumns+` FROM images WHERE is_deleted=1 AND is_nsfw=0 ORDER BY updated_at DESC LIMIT ? OFFSET ?`, limit, (page-1)*limit)
+	if err != nil {
+		fail(w, 500, "查询回收站失败")
+		return
+	}
+	defer rows.Close()
+	images := make([]Image, 0, limit)
+	for rows.Next() {
+		im, err := scanImage(rows)
+		if err != nil {
+			fail(w, 500, "查询回收站失败")
+			return
+		}
+		im.URL = "/api/images/preview/" + im.Filename
+		images = append(images, im)
+	}
+	if rows.Err() != nil {
+		fail(w, 500, "查询回收站失败")
+		return
+	}
+	ok(w, map[string]any{"images": images, "pagination": map[string]int{"page": page, "limit": limit, "total": total, "totalPages": (total + limit - 1) / limit}})
+}
+
+func (a *App) restoreImage(w http.ResponseWriter, r *http.Request) {
+	if !a.requireAdmin(w, r) {
+		return
+	}
+	result, err := a.DB.Exec(`UPDATE images SET is_deleted=0,updated_at=? WHERE id=? AND is_deleted=1 AND is_nsfw=0`, now(), r.PathValue("id"))
+	if err != nil {
+		fail(w, 500, "恢复图片失败")
+		return
+	}
+	count, _ := result.RowsAffected()
+	if count == 0 {
+		fail(w, 404, "回收站中没有该图片")
+		return
+	}
+	ok(w, map[string]bool{"restored": true})
+}
+
 func (a *App) nsfwImages(w http.ResponseWriter, r *http.Request) {
 	if !a.requireAdmin(w, r) {
 		return
@@ -142,6 +192,13 @@ func (a *App) clearNSFWImages(w http.ResponseWriter, r *http.Request) {
 func (a *App) purgeImages(w http.ResponseWriter, predicate string) {
 	count := 0
 	errors := make([]string, 0)
+	errorCount := 0
+	addError := func(uuid string) {
+		errorCount++
+		if len(errors) < 100 {
+			errors = append(errors, uuid)
+		}
+	}
 	lastID := ""
 	for {
 		rows, err := a.DB.Query(`SELECT id,uuid,filename FROM images WHERE `+predicate+` AND id>? ORDER BY id LIMIT 100`, lastID)
@@ -172,19 +229,19 @@ func (a *App) purgeImages(w http.ResponseWriter, predicate string) {
 		for _, item := range batch {
 			lastID = item.id
 			if !safeFilename.MatchString(item.filename) || !strings.HasPrefix(item.filename, item.uuid+".") {
-				errors = append(errors, item.uuid)
+				addError(item.uuid)
 				continue
 			}
 			if err := os.Remove(filepath.Join(a.DataDir, "uploads", item.filename)); err != nil && !os.IsNotExist(err) {
-				errors = append(errors, item.uuid)
+				addError(item.uuid)
 				continue
 			}
 			if _, err := a.DB.Exec(`DELETE FROM images WHERE id=?`, item.id); err != nil {
-				errors = append(errors, item.uuid)
+				addError(item.uuid)
 				continue
 			}
 			count++
 		}
 	}
-	ok(w, map[string]any{"deletedCount": count, "errors": errors})
+	ok(w, map[string]any{"deletedCount": count, "errors": errors, "errorCount": errorCount})
 }

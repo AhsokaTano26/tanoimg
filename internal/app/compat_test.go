@@ -92,6 +92,30 @@ func TestEasyImgBatchDeleteAndRecycleBin(t *testing.T) {
 	}
 }
 
+func TestRecycleBinCanListAndRestoreImages(t *testing.T) {
+	a := testApp(t)
+	token := adminToken(t, a)
+	im := fixtureImage(t, a, "33333333-3333-4333-8333-333333333333", false)
+	if got := adminRequest(a, token, http.MethodDelete, "/api/images/"+im.ID, ""); got.Code != 200 {
+		t.Fatalf("delete: %d %s", got.Code, got.Body.String())
+	}
+	if got := adminRequest(a, "", http.MethodGet, "/api/images/deleted", ""); got.Code != 401 {
+		t.Fatalf("anonymous recycle list: %d", got.Code)
+	}
+	if got := adminRequest(a, token, http.MethodGet, "/api/images/deleted", ""); got.Code != 200 || !strings.Contains(got.Body.String(), im.ID) {
+		t.Fatalf("recycle list: %d %s", got.Code, got.Body.String())
+	}
+	if got := adminRequest(a, token, http.MethodPut, "/api/images/"+im.ID+"/restore", ""); got.Code != 200 {
+		t.Fatalf("restore: %d %s", got.Code, got.Body.String())
+	}
+	if got := adminRequest(a, token, http.MethodGet, "/api/images/deleted", ""); got.Code != 200 || strings.Contains(got.Body.String(), im.ID) {
+		t.Fatalf("still recycled: %d %s", got.Code, got.Body.String())
+	}
+	if got := adminRequest(a, token, http.MethodGet, "/i/"+im.Filename, ""); got.Code != 200 {
+		t.Fatalf("restored file: %d %s", got.Code, got.Body.String())
+	}
+}
+
 func TestEasyImgNSFWReviewAndPreview(t *testing.T) {
 	a := testApp(t)
 	token := adminToken(t, a)
