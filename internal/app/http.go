@@ -300,7 +300,17 @@ func (a *App) putPublicConfig(w http.ResponseWriter, r *http.Request) {
 	}
 	b, _ := json.Marshal(merged)
 	var c uploadConfig
-	if json.Unmarshal(b, &c) != nil || c.MaxFileSize < 1 || c.MaxFileSize > 100<<20 || len(c.AllowedFormats) == 0 || c.RateLimit < 0 || c.RateLimit > 1000 {
+	if json.Unmarshal(b, &c) != nil {
+		fail(w, 400, "无效配置")
+		return
+	}
+	conversions := 0
+	for _, enabled := range []bool{c.ConvertToWebp, c.ConvertToPng, c.ConvertToJpg} {
+		if enabled {
+			conversions++
+		}
+	}
+	if c.MaxFileSize < 1 || c.MaxFileSize > 100<<20 || len(c.AllowedFormats) == 0 || c.RateLimit < 0 || c.RateLimit > 1000 || (c.CompressionQuality != 0 && (c.CompressionQuality < 1 || c.CompressionQuality > 100)) || conversions > 1 {
 		fail(w, 400, "无效配置")
 		return
 	}

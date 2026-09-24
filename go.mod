@@ -3,6 +3,7 @@ module github.com/AhsokaTano26/tanoimg
 go 1.26
 
 require (
+	github.com/SeriousBug/webp-go-pure v1.2.0
 	golang.org/x/crypto v0.53.0
 	modernc.org/sqlite v1.59.0
 )

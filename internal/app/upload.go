@@ -19,12 +19,29 @@ import (
 )
 
 type uploadConfig struct {
-	Enabled         bool                `json:"enabled"`
-	AllowedFormats  []string            `json:"allowedFormats"`
-	MaxFileSize     int64               `json:"maxFileSize"`
-	RateLimit       int                 `json:"rateLimit"`
-	AllowConcurrent bool                `json:"allowConcurrent"`
-	ContentSafety   contentSafetyConfig `json:"contentSafety"`
+	Enabled            bool                `json:"enabled"`
+	AllowedFormats     []string            `json:"allowedFormats"`
+	MaxFileSize        int64               `json:"maxFileSize"`
+	RateLimit          int                 `json:"rateLimit"`
+	AllowConcurrent    bool                `json:"allowConcurrent"`
+	ContentSafety      contentSafetyConfig `json:"contentSafety"`
+	EnableCompression  bool                `json:"enableCompression"`
+	CompressionQuality int                 `json:"compressionQuality"`
+	ConvertToWebp      bool                `json:"convertToWebp"`
+	ConvertToPng       bool                `json:"convertToPng"`
+	ConvertToJpg       bool                `json:"convertToJpg"`
+}
+
+func privateUploadConfig(a *App) uploadConfig {
+	c := uploadConfig{MaxFileSize: 100 << 20, CompressionQuality: 80}
+	json.Unmarshal(a.setting("privateApiConfig", privateDefaults()), &c)
+	if c.MaxFileSize < 1 || c.MaxFileSize > 200<<20 {
+		c.MaxFileSize = 100 << 20
+	}
+	if c.CompressionQuality < 1 || c.CompressionQuality > 100 {
+		c.CompressionQuality = 80
+	}
+	return c
 }
 
 func publicConfig(a *App) uploadConfig {
@@ -37,14 +54,7 @@ func publicConfig(a *App) uploadConfig {
 }
 
 func privateLimit(a *App) int64 {
-	var c struct {
-		MaxFileSize int64 `json:"maxFileSize"`
-	}
-	json.Unmarshal(a.setting("privateApiConfig", map[string]any{"maxFileSize": 100 << 20}), &c)
-	if c.MaxFileSize < 1 || c.MaxFileSize > 200<<20 {
-		return 100 << 20
-	}
-	return c.MaxFileSize
+	return privateUploadConfig(a).MaxFileSize
 }
 
 func detectFormat(head []byte) string {
@@ -115,11 +125,13 @@ func multipartFile(w http.ResponseWriter, r *http.Request, maxSize int64, tempDi
 }
 
 func (a *App) upload(w http.ResponseWriter, r *http.Request, public bool) {
-	maxSize := privateLimit(a)
+	config := privateUploadConfig(a)
+	maxSize := config.MaxFileSize
 	kind := "private"
 	if public {
 		kind = "public"
 		c := publicConfig(a)
+		config = c
 		if !c.Enabled {
 			fail(w, 403, "公共上传已禁用")
 			return
@@ -159,7 +171,7 @@ func (a *App) upload(w http.ResponseWriter, r *http.Request, public bool) {
 		fail(w, 400, err.Error())
 		return
 	}
-	defer func() { f.Close(); os.Remove(f.Name()) }()
+	defer func(uploaded *os.File) { uploaded.Close(); os.Remove(uploaded.Name()) }(f)
 	head := make([]byte, 512)
 	n, _ := f.Read(head)
 	format := detectFormat(head[:n])
@@ -187,6 +199,16 @@ func (a *App) upload(w http.ResponseWriter, r *http.Request, public bool) {
 	width, height := 0, 0
 	if cfg, _, err := image.DecodeConfig(f); err == nil {
 		width, height = cfg.Width, cfg.Height
+	}
+	processed, processedFormat, processedSize, err := a.processImageFile(r.Context(), f, format, size, config, 100<<10)
+	if err != nil {
+		fail(w, 400, err.Error())
+		return
+	}
+	if processed != f {
+		defer func() { processed.Close(); os.Remove(processed.Name()) }()
+		f = processed
+		format, size = processedFormat, processedSize
 	}
 	uuid, err := newID()
 	if err != nil {

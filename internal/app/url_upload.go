@@ -128,7 +128,7 @@ func (a *App) importRemoteImage(r *http.Request, raw, uploadedBy, uploadedByType
 	if err != nil {
 		return Image{}, err
 	}
-	defer func() { f.Close(); os.Remove(f.Name()) }()
+	defer func(downloaded *os.File) { downloaded.Close(); os.Remove(downloaded.Name()) }(f)
 	size, err := io.Copy(f, io.LimitReader(response.Body, maxSize+1))
 	if err != nil {
 		return Image{}, err
@@ -151,6 +151,15 @@ func (a *App) importRemoteImage(r *http.Request, raw, uploadedBy, uploadedByType
 	width, height := 0, 0
 	if cfg, _, err := image.DecodeConfig(f); err == nil {
 		width, height = cfg.Width, cfg.Height
+	}
+	processed, processedFormat, processedSize, err := a.processImageFile(r.Context(), f, format, size, privateUploadConfig(a), 200<<10)
+	if err != nil {
+		return Image{}, err
+	}
+	if processed != f {
+		defer func() { processed.Close(); os.Remove(processed.Name()) }()
+		f = processed
+		format, size = processedFormat, processedSize
 	}
 	uuid, err := newID()
 	if err != nil {

@@ -377,3 +377,64 @@ func TestEasyImgNotificationConfigAndWebhook(t *testing.T) {
 		t.Fatalf("test notification: %d %s", got.Code, got.Body.String())
 	}
 }
+
+func TestEasyImgImageFormatConversion(t *testing.T) {
+	a := testApp(t)
+	token := adminToken(t, a)
+	if err := a.setSetting("privateApiConfig", json.RawMessage(`{"maxFileSize":1048576,"convertToWebp":true,"compressionQuality":80}`)); err != nil {
+		t.Fatal(err)
+	}
+	var body bytes.Buffer
+	form := multipart.NewWriter(&body)
+	file, _ := form.CreateFormFile("file", "photo.png")
+	file.Write(tinyPNG(t))
+	form.Close()
+	req := httptest.NewRequest(http.MethodPost, "/api/upload/private", &body)
+	req.Header.Set("Content-Type", form.FormDataContentType())
+	req.Header.Set("Authorization", "Bearer "+token)
+	rec := httptest.NewRecorder()
+	a.Handler().ServeHTTP(rec, req)
+	if rec.Code != 200 || !strings.Contains(rec.Body.String(), `"format":"webp"`) {
+		t.Fatalf("WebP conversion: %d %s", rec.Code, rec.Body.String())
+	}
+	var result struct {
+		Data Image `json:"data"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &result); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(filepath.Join(a.DataDir, "uploads", result.Data.Filename))
+	if err != nil || detectFormat(data) != "webp" {
+		t.Fatalf("converted file: %s %v", result.Data.Filename, err)
+	}
+}
+
+func TestEasyImgPublicImageConversion(t *testing.T) {
+	a := testApp(t)
+	token := adminToken(t, a)
+	if got := adminRequest(a, token, http.MethodPut, "/api/config/public", `{"enabled":true,"allowedFormats":["png"],"maxFileSize":1048576,"rateLimit":10,"convertToWebp":true,"convertToJpg":true}`); got.Code != 400 {
+		t.Fatalf("conflicting conversions accepted: %d %s", got.Code, got.Body.String())
+	}
+	if got := adminRequest(a, token, http.MethodPut, "/api/config/public", `{"enabled":true,"allowedFormats":["png"],"maxFileSize":1048576,"rateLimit":10,"convertToWebp":true,"compressionQuality":80}`); got.Code != 200 {
+		t.Fatalf("save conversion: %d %s", got.Code, got.Body.String())
+	}
+	var body bytes.Buffer
+	form := multipart.NewWriter(&body)
+	file, err := form.CreateFormFile("file", "public.png")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := file.Write(tinyPNG(t)); err != nil {
+		t.Fatal(err)
+	}
+	if err := form.Close(); err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/api/upload/public", &body)
+	req.Header.Set("Content-Type", form.FormDataContentType())
+	rec := httptest.NewRecorder()
+	a.Handler().ServeHTTP(rec, req)
+	if rec.Code != 200 || !strings.Contains(rec.Body.String(), `"format":"webp"`) {
+		t.Fatalf("public conversion: %d %s", rec.Code, rec.Body.String())
+	}
+}
