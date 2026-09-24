@@ -19,6 +19,7 @@ import (
 )
 
 type uploadConfig struct {
+	AutoBan            autoBanConfig       `json:"autoBan"`
 	Enabled            bool                `json:"enabled"`
 	AllowedFormats     []string            `json:"allowedFormats"`
 	MaxFileSize        int64               `json:"maxFileSize"`
@@ -45,7 +46,7 @@ func privateUploadConfig(a *App) uploadConfig {
 }
 
 func publicConfig(a *App) uploadConfig {
-	c := uploadConfig{Enabled: false, AllowedFormats: []string{"jpg", "jpeg", "png", "gif", "webp", "avif", "svg", "bmp", "ico", "apng", "tiff"}, MaxFileSize: 10 << 20, RateLimit: 10}
+	c := uploadConfig{Enabled: false, AllowedFormats: []string{"jpg", "jpeg", "png", "gif", "webp", "avif", "svg", "bmp", "ico", "apng", "tiff"}, MaxFileSize: 10 << 20, RateLimit: 10, AutoBan: autoBanConfig{Enabled: true, WindowMinutes: 10, MaxAttempts: 120}}
 	json.Unmarshal(a.setting("publicApiConfig", c), &c)
 	if c.MaxFileSize < 1 || c.MaxFileSize > 100<<20 {
 		c.MaxFileSize = 10 << 20
@@ -138,36 +139,25 @@ func (a *App) upload(w http.ResponseWriter, r *http.Request, public bool) {
 		kind = "public"
 		c := publicConfig(a)
 		config = c
-		if !c.Enabled {
-			fail(w, 403, "公共上传已禁用")
+		release, allowed := a.beginPublicUpload(w, r, c)
+		if !allowed {
 			return
 		}
-		var blocked int
-		if a.DB.QueryRow(`SELECT 1 FROM ip_blacklist WHERE ip=?`, a.clientIP(r)).Scan(&blocked) == nil {
-			fail(w, 403, "该 IP 已被禁止上传")
-			return
-		}
+		defer release()
 		maxSize = c.MaxFileSize
-		if !a.allowPublicRequest(a.clientIP(r), c.RateLimit) {
-			fail(w, 429, "公开上传过于频繁，请稍后重试")
-			return
-		}
-		if !c.AllowConcurrent {
-			ip := a.clientIP(r)
-			a.publicMu.Lock()
-			if a.publicActive[ip] {
-				a.publicMu.Unlock()
-				fail(w, 429, "请等待上一张图片上传完成")
-				return
-			}
-			a.publicActive[ip] = true
-			a.publicMu.Unlock()
-			defer func() { a.publicMu.Lock(); delete(a.publicActive, ip); a.publicMu.Unlock() }()
-		}
 	} else if a.userID(r) == "" && !a.hasAPIKey(r) {
 		fail(w, 401, "缺少有效的 API Key 或登录状态")
 		return
 	}
+	if !public {
+		visibility, valid := uploadVisibility(r)
+		if !valid {
+			fail(w, 400, "visibility 必须为 private 或 public")
+			return
+		}
+		kind = visibility
+	}
+	isPublic := kind == "public"
 	if !a.acquireUploadSlot(w, r) {
 		return
 	}
@@ -255,7 +245,7 @@ func (a *App) upload(w http.ResponseWriter, r *http.Request, public bool) {
 		}
 	}
 	im := Image{ID: id, UUID: uuid, Filename: filename, OriginalName: original, Format: format, Size: size, Width: width, Height: height, UploadedByType: kind, UploadedBy: "API用户", UploadedAt: now(), IP: a.clientIP(r)}
-	if public {
+	if isPublic {
 		im.UploadedBy = "访客"
 		if publicConfig(a).ContentSafety.Enabled {
 			im.ModerationStatus = "pending"
@@ -263,15 +253,18 @@ func (a *App) upload(w http.ResponseWriter, r *http.Request, public bool) {
 			im.ModerationStatus = "skipped"
 			im.ModerationChecked = true
 		}
-	} else if userID := a.userID(r); userID != "" {
+	}
+	if userID := a.userID(r); userID != "" {
 		a.DB.QueryRow(`SELECT username FROM users WHERE id=?`, userID).Scan(&im.UploadedBy)
-	} else {
+	} else if !public {
 		key := r.Header.Get("X-API-Key")
 		if key == "" {
 			key = r.URL.Query().Get("apiKey")
 		}
 		a.DB.QueryRow(`SELECT id,name FROM apikeys WHERE key=? AND enabled=1`, key).Scan(&im.APIKeyID, &im.UploadedBy)
-		im.UploadedByType = "apikey"
+		if !isPublic {
+			im.UploadedByType = "apikey"
+		}
 	}
 	im.UpdatedAt = im.UploadedAt
 	im.URL = "/i/" + filename
@@ -280,7 +273,7 @@ func (a *App) upload(w http.ResponseWriter, r *http.Request, public bool) {
 		fail(w, 500, "保存图片记录失败")
 		return
 	}
-	if public && im.ModerationStatus == "pending" {
+	if isPublic && im.ModerationStatus == "pending" {
 		if err := a.enqueueModeration(im); err != nil {
 			a.DB.Exec(`DELETE FROM images WHERE id=?`, im.ID)
 			os.Remove(dest)

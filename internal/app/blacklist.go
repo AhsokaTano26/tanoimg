@@ -75,7 +75,19 @@ func (a *App) deleteBlacklist(w http.ResponseWriter, r *http.Request) {
 	if !a.requireAdmin(w, r) {
 		return
 	}
-	result, err := a.DB.Exec(`DELETE FROM ip_blacklist WHERE id=?`, r.PathValue("id"))
+	tx, err := a.DB.BeginTx(r.Context(), nil)
+	if err != nil {
+		fail(w, 500, "删除黑名单失败")
+		return
+	}
+	defer tx.Rollback()
+	for _, table := range []string{"public_upload_attempts", "upload_rates"} {
+		if _, err = tx.Exec("DELETE FROM "+table+" WHERE ip=(SELECT ip FROM ip_blacklist WHERE id=?)", r.PathValue("id")); err != nil {
+			fail(w, 500, "删除黑名单失败")
+			return
+		}
+	}
+	result, err := tx.Exec(`DELETE FROM ip_blacklist WHERE id=?`, r.PathValue("id"))
 	if err != nil {
 		fail(w, 500, "删除黑名单失败")
 		return
@@ -83,6 +95,10 @@ func (a *App) deleteBlacklist(w http.ResponseWriter, r *http.Request) {
 	n, _ := result.RowsAffected()
 	if n == 0 {
 		fail(w, 404, "记录不存在")
+		return
+	}
+	if err := tx.Commit(); err != nil {
+		fail(w, 500, "删除黑名单失败")
 		return
 	}
 	ok(w, nil)

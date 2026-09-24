@@ -101,6 +101,9 @@ func (a *App) urlUploader(w http.ResponseWriter, r *http.Request) (string, strin
 }
 
 func (a *App) importRemoteImage(r *http.Request, raw, uploadedBy, uploadedByType string, maxSize int64) (Image, error) {
+	return a.importRemoteWithConfig(r, raw, uploadedBy, uploadedByType, maxSize, privateUploadConfig(a), false)
+}
+func (a *App) importRemoteWithConfig(r *http.Request, raw, uploadedBy, uploadedByType string, maxSize int64, config uploadConfig, enforceFormats bool) (Image, error) {
 	u, err := parseRemoteURL(raw)
 	if err != nil {
 		return Image{}, err
@@ -152,11 +155,14 @@ func (a *App) importRemoteImage(r *http.Request, raw, uploadedBy, uploadedByType
 	if _, err := f.Seek(0, io.SeekStart); err != nil {
 		return Image{}, err
 	}
+	if enforceFormats && !formatAllowed(config.AllowedFormats, format) {
+		return Image{}, errors.New("该图片格式未开放上传")
+	}
 	width, height := 0, 0
 	if cfg, _, err := image.DecodeConfig(f); err == nil {
 		width, height = cfg.Width, cfg.Height
 	}
-	processed, processedFormat, processedSize, err := a.processImageFile(r.Context(), f, format, size, privateUploadConfig(a), 200<<10)
+	processed, processedFormat, processedSize, err := a.processImageFile(r.Context(), f, format, size, config, 200<<10)
 	if err != nil {
 		return Image{}, err
 	}
@@ -183,11 +189,26 @@ func (a *App) importRemoteImage(r *http.Request, raw, uploadedBy, uploadedByType
 		original = "image." + format
 	}
 	im := Image{ID: id, UUID: uuid, Filename: filename, OriginalName: original, Format: format, Size: size, Width: width, Height: height, UploadedBy: uploadedBy, UploadedByType: uploadedByType, UploadedAt: now(), SourceURL: raw, IP: a.clientIP(r)}
+	if uploadedByType == "public" {
+		if publicConfig(a).ContentSafety.Enabled {
+			im.ModerationStatus = "pending"
+		} else {
+			im.ModerationStatus = "skipped"
+			im.ModerationChecked = true
+		}
+	}
 	im.UpdatedAt = im.UploadedAt
 	im.URL = "/i/" + filename
 	if err := a.saveImage(im); err != nil {
 		os.Remove(dest)
 		return Image{}, err
+	}
+	if im.ModerationStatus == "pending" {
+		if err := a.enqueueModeration(im); err != nil {
+			a.DB.Exec(`DELETE FROM images WHERE id=?`, im.ID)
+			os.Remove(dest)
+			return Image{}, err
+		}
 	}
 	a.enqueueNotification("upload", "图片上传", original+" 已从 URL 上传", map[string]any{"id": im.ID, "filename": im.Filename, "url": im.URL, "size": im.Size, "ip": im.IP, "type": im.UploadedByType})
 	return im, nil
@@ -197,6 +218,14 @@ func (a *App) uploadURL(w http.ResponseWriter, r *http.Request) {
 	name, kind, valid := a.urlUploader(w, r)
 	if !valid {
 		return
+	}
+	visibility, validVisibility := uploadVisibility(r)
+	if !validVisibility {
+		fail(w, 400, "visibility 必须为 private 或 public")
+		return
+	}
+	if visibility == "public" {
+		kind = "public"
 	}
 	var body struct {
 		URL          json.RawMessage `json:"url"`
@@ -273,6 +302,14 @@ func (a *App) uploadURLs(w http.ResponseWriter, r *http.Request) {
 	if !valid {
 		return
 	}
+	visibility, validVisibility := uploadVisibility(r)
+	if !validVisibility {
+		fail(w, 400, "visibility 必须为 private 或 public")
+		return
+	}
+	if visibility == "public" {
+		kind = "public"
+	}
 	var body struct {
 		URLs []string `json:"urls"`
 	}
@@ -324,4 +361,34 @@ func (a *App) uploadURLs(w http.ResponseWriter, r *http.Request) {
 		send("progress", map[string]any{"index": i + 1, "total": len(urls), "url": raw, "status": "success", "data": im})
 	}
 	send("complete", map[string]any{"total": len(urls), "successCount": success, "failCount": failed})
+}
+
+func (a *App) uploadPublicURL(w http.ResponseWriter, r *http.Request) {
+	c := publicConfig(a)
+	release, allowed := a.beginPublicUpload(w, r, c)
+	if !allowed {
+		return
+	}
+	defer release()
+	var body struct {
+		URL string `json:"url"`
+	}
+	if json.NewDecoder(http.MaxBytesReader(w, r.Body, 8192)).Decode(&body) != nil || len(body.URL) > 2048 {
+		fail(w, 400, "请提供一个有效的图片 URL")
+		return
+	}
+	if _, err := parseRemoteURL(body.URL); err != nil {
+		fail(w, 400, err.Error())
+		return
+	}
+	if !a.acquireUploadSlot(w, r) {
+		return
+	}
+	defer func() { <-a.limiter }()
+	im, err := a.importRemoteWithConfig(r, body.URL, "访客", "public", c.MaxFileSize, c, true)
+	if err != nil {
+		fail(w, 400, err.Error())
+		return
+	}
+	ok(w, im)
 }

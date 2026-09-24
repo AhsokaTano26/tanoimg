@@ -42,6 +42,7 @@ func (a *App) Handler() http.Handler {
 	mux.HandleFunc("PUT /api/admin/username", a.changeUsername)
 	mux.HandleFunc("POST /api/upload/public", func(w http.ResponseWriter, r *http.Request) { a.upload(w, r, true) })
 	mux.HandleFunc("POST /api/upload/private", func(w http.ResponseWriter, r *http.Request) { a.upload(w, r, false) })
+	mux.HandleFunc("POST /api/upload/public/url", a.uploadPublicURL)
 	mux.HandleFunc("POST /api/upload/url", a.uploadURL)
 	mux.HandleFunc("POST /api/upload/urls", a.uploadURLs)
 	mux.HandleFunc("GET /api/images", a.images)
@@ -326,6 +327,16 @@ func (a *App) putPublicConfig(w http.ResponseWriter, r *http.Request) {
 	if json.Unmarshal(b, &c) != nil {
 		fail(w, 400, "无效配置")
 		return
+	}
+	if c.AutoBan.Enabled && (c.AutoBan.WindowMinutes < 1 || c.AutoBan.WindowMinutes > 1440 || c.AutoBan.MaxAttempts < 1 || c.AutoBan.MaxAttempts > 100000) {
+		fail(w, 400, "自动封禁时间窗需为 1–1440 分钟，次数需为 1–100000")
+		return
+	}
+	for _, ext := range c.AllowedFormats {
+		if !formatAllowed([]string{"jpg", "jpeg", "png", "gif", "webp", "avif", "svg", "bmp", "ico", "apng", "tiff"}, ext) {
+			fail(w, 400, "不支持的允许格式")
+			return
+		}
 	}
 	conversions := 0
 	for _, enabled := range []bool{c.ConvertToWebp, c.ConvertToPng, c.ConvertToJpg} {
