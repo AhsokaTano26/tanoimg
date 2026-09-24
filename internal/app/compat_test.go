@@ -3,6 +3,7 @@ package app
 import (
 	"bytes"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -10,6 +11,10 @@ import (
 	"strings"
 	"testing"
 )
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (fn roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { return fn(r) }
 
 func adminToken(t *testing.T, a *App) string {
 	t.Helper()
@@ -145,5 +150,43 @@ func TestEasyImgUsernameAndAPIKeyUpdates(t *testing.T) {
 	}
 	if got := adminRequest(a, token, http.MethodPut, "/api/apikeys/missing", `{"enabled":true}`); got.Code != 404 {
 		t.Fatalf("missing key: %d", got.Code)
+	}
+}
+
+func TestEasyImgURLUpload(t *testing.T) {
+	a := testApp(t)
+	token := adminToken(t, a)
+	pngData := tinyPNG(t)
+	a.urlClient = &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		return &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": []string{"image/png"}}, Body: io.NopCloser(bytes.NewReader(pngData)), Request: r}, nil
+	})}
+	if got := adminRequest(a, "", http.MethodPost, "/api/upload/url", `{"url":"https://images.example/photo.png"}`); got.Code != 401 {
+		t.Fatalf("anonymous url upload: %d", got.Code)
+	}
+	if got := adminRequest(a, token, http.MethodPost, "/api/upload/url", `{"url":"http://127.0.0.1/private.png"}`); got.Code != 400 {
+		t.Fatalf("loopback fetched: %d %s", got.Code, got.Body.String())
+	}
+	if got := adminRequest(a, token, http.MethodPost, "/api/upload/url", `{"url":"https://images.example/photo.png"}`); got.Code != 200 || !strings.Contains(got.Body.String(), `"uploadedByType":"url"`) {
+		t.Fatalf("url upload: %d %s", got.Code, got.Body.String())
+	}
+	var count int
+	if err := a.DB.QueryRow(`SELECT count(*) FROM images WHERE uploaded_by_type='url'`).Scan(&count); err != nil || count != 1 {
+		t.Fatalf("url row: %d %v", count, err)
+	}
+	if got := adminRequest(a, token, http.MethodPost, "/api/upload/url", `{"url":["https://images.example/a.png","http://127.0.0.1/private.png"]}`); got.Code != 200 || !strings.Contains(got.Body.String(), `"successCount":1`) || !strings.Contains(got.Body.String(), `"errorCount":1`) {
+		t.Fatalf("array upload: %d %s", got.Code, got.Body.String())
+	}
+}
+
+func TestEasyImgURLUploadSSE(t *testing.T) {
+	a := testApp(t)
+	token := adminToken(t, a)
+	pngData := tinyPNG(t)
+	a.urlClient = &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		return &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": []string{"image/png"}}, Body: io.NopCloser(bytes.NewReader(pngData)), Request: r}, nil
+	})}
+	got := adminRequest(a, token, http.MethodPost, "/api/upload/urls", `{"urls":["https://images.example/a.png","https://images.example/a.png"]}`)
+	if got.Code != 200 || !strings.HasPrefix(got.Header().Get("Content-Type"), "text/event-stream") || !strings.Contains(got.Body.String(), "event: complete") || !strings.Contains(got.Body.String(), `"successCount":1`) {
+		t.Fatalf("SSE: %d %s", got.Code, got.Body.String())
 	}
 }

@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
 	"os"
 	"path/filepath"
 	"time"
@@ -28,6 +29,7 @@ type App struct {
 	limiter    chan struct{}
 	waiters    chan struct{}
 	TrustProxy bool
+	urlClient  *http.Client
 }
 
 type Image struct {
@@ -74,7 +76,7 @@ func New(c Config) (*App, error) {
 		return nil, err
 	}
 	db.SetMaxOpenConns(1)
-	a := &App{DB: db, DataDir: c.DataDir, limiter: make(chan struct{}, 4), waiters: make(chan struct{}, 32), TrustProxy: c.TrustProxy}
+	a := &App{DB: db, DataDir: c.DataDir, limiter: make(chan struct{}, 4), waiters: make(chan struct{}, 32), TrustProxy: c.TrustProxy, urlClient: newURLClient()}
 	for _, q := range []string{
 		`PRAGMA journal_mode=WAL`,
 		`CREATE TABLE IF NOT EXISTS images (id TEXT PRIMARY KEY, uuid TEXT NOT NULL UNIQUE, filename TEXT NOT NULL, original_name TEXT NOT NULL DEFAULT '', format TEXT NOT NULL, size INTEGER NOT NULL, width INTEGER NOT NULL DEFAULT 0, height INTEGER NOT NULL DEFAULT 0, uploaded_by TEXT NOT NULL DEFAULT '', uploaded_by_type TEXT NOT NULL DEFAULT 'private', uploaded_at TEXT NOT NULL, updated_at TEXT NOT NULL, is_deleted INTEGER NOT NULL DEFAULT 0, is_nsfw INTEGER NOT NULL DEFAULT 0)`,

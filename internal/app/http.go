@@ -41,6 +41,8 @@ func (a *App) Handler() http.Handler {
 	mux.HandleFunc("PUT /api/admin/username", a.changeUsername)
 	mux.HandleFunc("POST /api/upload/public", func(w http.ResponseWriter, r *http.Request) { a.upload(w, r, true) })
 	mux.HandleFunc("POST /api/upload/private", func(w http.ResponseWriter, r *http.Request) { a.upload(w, r, false) })
+	mux.HandleFunc("POST /api/upload/url", a.uploadURL)
+	mux.HandleFunc("POST /api/upload/urls", a.uploadURLs)
 	mux.HandleFunc("GET /api/images", a.images)
 	mux.HandleFunc("DELETE /api/images/batch", a.batchDeleteImages)
 	mux.HandleFunc("GET /api/images/nsfw", a.nsfwImages)
