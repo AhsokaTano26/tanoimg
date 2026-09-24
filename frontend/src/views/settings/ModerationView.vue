@@ -1,0 +1,9 @@
+<script setup>
+import {computed} from 'vue';
+import SettingsPage from '../../components/SettingsPage.vue';
+import FormField from '../../components/FormField.vue';
+import {useSettings} from '../../composables/useSettings.js';
+const {model,busy,saving,error,load,save}=useSettings('/api/config/public',value=>{const safety={enabled:false,provider:'elysiatools',autoBlacklistIp:false,...value.contentSafety};safety.providers={...safety.providers};for(const name of ['elysiatools','nsfwdet','nsfw_detector'])safety.providers[name]={apiUrl:'',uploadUrl:'',apiKey:'',threshold:name==='nsfw_detector'?0.8:0.5,...safety.providers[name]};return safety;});
+const provider=computed(()=>model.value?.providers[model.value.provider]);
+</script>
+<template><SettingsPage title="内容安全审核" description="公开图片在后台审核，违规图片将停止对外访问。" :busy="busy" :error="error" @retry="load"><form class="settings-panel form-stack" novalidate @submit.prevent="save({contentSafety:model})"><FormField v-model="model.enabled" type="checkbox" label="启用内容审核" /><FormField v-model="model.provider" type="select" label="审核服务" :options="[{label:'Elysia Tools',value:'elysiatools'},{label:'NSFW Detector',value:'nsfwdet'},{label:'自建 nsfw_detector',value:'nsfw_detector'}]" /><div class="settings-form-grid"><FormField v-model="provider.apiUrl" label="API URL" placeholder="留空使用服务默认地址" /><FormField v-if="model.provider==='elysiatools'" v-model="provider.uploadUrl" label="上传 URL" placeholder="留空使用服务默认地址" /><FormField v-model="provider.apiKey" type="password" label="API Key / Token" /><FormField v-if="model.provider!=='elysiatools'" v-model="provider.threshold" type="number" :min="0" :max="1" :step="0.01" label="违规阈值（0–1）" /></div><FormField v-model="model.autoBlacklistIp" type="checkbox" label="发现违规图片后自动拉黑上传 IP" /><UiButton type="submit" variant="primary" :loading="saving">保存审核设置</UiButton></form></SettingsPage></template>

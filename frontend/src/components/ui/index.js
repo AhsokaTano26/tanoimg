@@ -1,0 +1,11 @@
+import UiDrawer from './UiDrawer.vue';
+import UiButton from './UiButton.vue';
+import UiInput from './UiInput.vue';
+import UiSelect from './UiSelect.vue';
+import UiCheckbox from './UiCheckbox.vue';
+import UiSlider from './UiSlider.vue';
+import UiDialog from './UiDialog.vue';
+import UiFile from './UiFile.vue';
+import UiMenu from './UiMenu.vue';
+import UiProgress from './UiProgress.vue';
+export default { install(app) { for (const [name, component] of Object.entries({ UiDrawer, UiButton, UiInput, UiSelect, UiCheckbox, UiSlider, UiDialog, UiFile, UiMenu, UiProgress })) app.component(name, component); } };

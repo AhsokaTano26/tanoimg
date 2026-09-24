@@ -94,7 +94,7 @@ func (a *App) page(w http.ResponseWriter, r *http.Request) {
 	name := "index.html"
 	switch r.URL.Path {
 	case "/", "/login", "/gallery", "/upload":
-	case "/admin", "/admin/gallery", "/admin/upload", "/admin/recycle", "/admin/settings", "/admin/api", "/admin/stats", "/recycle", "/settings", "/api", "/stats":
+	case "/admin/appearance", "/admin/site", "/admin/public-upload", "/admin/private-upload", "/admin/apikeys", "/admin/moderation", "/admin/moderation-images", "/admin/notification", "/admin/account", "/admin/blacklist", "/admin/storage", "/admin/about", "/admin", "/admin/gallery", "/admin/upload", "/admin/recycle", "/admin/settings", "/admin/api", "/admin/stats", "/recycle", "/settings", "/api", "/stats":
 		if a.userID(r) == "" {
 			target := r.URL.Path
 			if !strings.HasPrefix(target, "/admin") {

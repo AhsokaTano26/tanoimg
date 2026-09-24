@@ -1,0 +1,22 @@
+<script setup>
+import SettingsPage from '../../components/SettingsPage.vue';
+import FormField from '../../components/FormField.vue';
+import {useSettings,processingFields,processingBody,conversionOptions} from '../../composables/useSettings.js';
+import {toast} from '../../runtime.js';
+const props=defineProps({publicUpload:Boolean});
+const endpoint=props.publicUpload?'/api/config/public':'/api/config/private';
+const {model,busy,saving,error,load,save}=useSettings(endpoint,value=>({...processingFields(value),maxMB:Math.round(value.maxFileSize/1048576),allowedFormats:(value.allowedFormats||[]).map(x=>x.toLowerCase()),autoBan:{enabled:true,windowMinutes:10,maxAttempts:120,...value.autoBan}}));
+const formats=[['JPEG','jpg','jpeg'],['PNG','png'],['GIF','gif'],['WebP','webp'],['AVIF','avif'],['SVG','svg'],['BMP','bmp'],['ICO','ico'],['APNG','apng'],['TIFF','tiff']];
+function formatChecked(option){return option.slice(1).some(value=>model.value.allowedFormats.includes(value));}
+function toggleFormat(option,on){const values=new Set(model.value.allowedFormats);for(const value of option.slice(1)){on?values.add(value):values.delete(value);}model.value.allowedFormats=[...values];}
+async function submit(){
+ const c=model.value;
+ if(!Number.isInteger(c.maxMB)||c.maxMB<1||c.maxMB>(props.publicUpload?100:200)){toast('请输入有效文件大小限制');return;}
+ if(!Number.isInteger(c.compressionQuality)||c.compressionQuality<1||c.compressionQuality>100){toast('压缩质量需为 1–100');return;}
+ let body={maxFileSize:c.maxMB*1048576,...processingBody(c)};
+ if(props.publicUpload){if(!c.allowedFormats.length){toast('至少允许一种图片格式');return;}body={...body,enabled:c.enabled,allowedFormats:c.allowedFormats,rateLimit:c.rateLimit,allowConcurrent:c.allowConcurrent,autoBan:c.autoBan};}
+ else body.showOnHomepage=!!c.showOnHomepage;
+ await save(body);
+}
+</script>
+<template><SettingsPage :title="publicUpload?'公共上传设置':'私人上传设置'" :description="publicUpload?'管理访客上传格式、频率与自动封禁。文件和 URL 上传共用这些规则。':'设置管理员及 API Key 上传的文件限制与处理方式。'" :busy="busy" :error="error" @retry="load"><form class="form-stack" novalidate @submit.prevent="submit"><section class="settings-panel form-stack"><h2>上传权限</h2><FormField v-if="publicUpload" v-model="model.enabled" type="checkbox" label="允许访客公共上传" /><FormField v-else v-model="model.showOnHomepage" type="checkbox" label="在公共图库展示私人图片" help="开启后，历史私人图片也会在访客图库中显示。" /><FormField v-model="model.maxMB" label="单张文件上限（MB）" type="number" :min="1" :max="publicUpload?100:200" /><template v-if="publicUpload"><div class="form-field"><span class="field-label">允许上传的图片格式</span><div class="format-options"><UiCheckbox v-for="format in formats" :key="format[0]" :label="format[0]" :modelValue="formatChecked(format)" @update:modelValue="toggleFormat(format,$event)" /></div></div><div class="settings-form-grid"><FormField v-model="model.rateLimit" type="number" :min="1" :max="1000" label="每 IP 每分钟请求上限" /><FormField v-model="model.allowConcurrent" type="checkbox" label="允许同一 IP 并发上传" /></div></template></section><section v-if="publicUpload" class="settings-panel form-stack"><h2>自动封禁</h2><p>超过阈值的 IP 自动进入黑名单。文件、URL 上传及失败／限流请求均计入，管理员可在 IP 黑名单中解除。</p><FormField v-model="model.autoBan.enabled" type="checkbox" label="启用公共上传自动封禁" /><div class="settings-form-grid"><FormField v-model="model.autoBan.windowMinutes" label="统计时间窗（分钟）" type="number" :min="1" :max="1440" /><FormField v-model="model.autoBan.maxAttempts" label="时间窗内最多请求次数" type="number" :min="1" :max="100000" /></div><RouterLink to="/admin/blacklist" class="text-button">管理 IP 黑名单</RouterLink></section><section class="settings-panel form-stack"><h2>图片处理</h2><FormField v-model="model.enableCompression" type="checkbox" label="压缩图片" /><div class="settings-form-grid"><FormField v-model="model.compressionQuality" label="压缩质量（1–100）" type="number" :min="1" :max="100" /><FormField v-model="model.convert" label="格式转换" type="select" :options="conversionOptions" /></div><p class="field-help">GIF / APNG 动画保留原文件；图片处理逐张执行以控制内存。</p></section><UiButton type="submit" variant="primary" :loading="saving">保存上传设置</UiButton></form></SettingsPage></template>
