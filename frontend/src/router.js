@@ -18,7 +18,7 @@ export const router = createRouter({
   }),
   scrollBehavior(to, from, saved) {
     if (saved) return saved;
-    if (to.hash) return { el: to.hash, top: innerWidth <= 700 ? 140 : 32, behavior: 'smooth' };
+    if (to.hash) return { el: to.hash, top: innerWidth <= 700 ? 200 : 32, behavior: 'smooth' };
     return { top: 0 };
   },
 });

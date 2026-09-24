@@ -50,3 +50,10 @@ test('login redirects cannot leave the local admin area', () => {
   }
   assert.equal(loginDestination('/admin/settings'), '/admin/settings');
 });
+test('failed session checks fail closed instead of leaving an unresolved navigation', async () => {
+  const session = { admin: true };
+  const guard = accessGuard(session, async () => { throw new Error('offline'); });
+  const result = await guard({ meta: { requiresAuth: true }, path: '/admin/settings' });
+  assert.equal(result.name, 'login');
+  assert.equal(session.admin, false);
+});

@@ -85,6 +85,15 @@ async function saveAppearance(url, blur) {
   toast('外观设置已保存');
 }
 
+function previewButton(img) {
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = 'image-preview';
+  button.setAttribute('aria-label', '预览 ' + img.alt);
+  button.append(img);
+  button.addEventListener('click', event => { if (event.target !== img) img.click(); });
+  return button;
+}
 function imageCard(image, selectable = false) {
   const card = document.createElement('article'); card.className = 'image-card';
   const img = document.createElement('img'); img.src = image.url; img.alt = image.originalName || '图片'; img.loading = 'lazy';
@@ -110,7 +119,7 @@ function imageCard(image, selectable = false) {
     button.onclick = async () => { if (!confirm('确定将这张图片移入回收站？')) return; try { await api(`/api/images/${encodeURIComponent(image.id)}`, { method: 'DELETE' }); toast('已移入回收站，可从图库右上角恢复'); await loadGallery(); await loadRecent(); } catch (error) { toast(error.message); } };
     actions.append(button);
   }
-  card.append(img, meta, actions); return card;
+  card.append(previewButton(img), meta, actions); return card;
 }
 
 function renderImages(element, images) {
@@ -162,7 +171,7 @@ function recycleCard(image) {
     try { await api(`/api/images/${encodeURIComponent(image.id)}/restore`, {method:'PUT'}); toast('图片已恢复到图库'); await loadRecycle(); }
     catch(error) { toast(error.message); restore.disabled = false; }
   };
-  actions.append(restore); card.append(img, meta, actions); return card;
+  actions.append(restore); card.append(previewButton(img), meta, actions); return card;
 }
 
 async function loadRecycle() {
@@ -208,7 +217,6 @@ async function loadStatsView() {
 
 async function loadSettings() {
   if (!$('#settings-content')) return;
-  $('#admin-username').value = session.username;
   try {
     const [stats, config, keys, blacklist, appearance, privateConfig, nsfw, notification] = await Promise.all([api('/api/settings/stats'), api('/api/config/public'), api('/api/apikeys'), api('/api/blacklist?limit=100'), api('/api/settings'), api('/api/config/private'), api('/api/images/nsfw?limit=20'), api('/api/notification')]);
     fillAppearance(appearance);
@@ -374,7 +382,7 @@ $('#notification-form')?.addEventListener('submit', async event => { event.preve
 $('#test-notification')?.addEventListener('click', async () => { const button = $('#test-notification'); button.disabled = true; try { await api('/api/notification/test', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(notificationBody())}); toast('测试通知已发送'); } catch(error){toast(error.message);} finally {button.disabled = false;} });
 $('#site-form')?.addEventListener('submit', async event => { event.preventDefault(); const body = {appName:$('#site-name').value.trim(), appLogo:$('#site-logo').value.trim(), siteUrl:$('#site-url').value.trim(), announcement:{enabled:$('#announcement-enabled').checked, content:$('#announcement-content').value, displayType:$('#announcement-type').value}}; try { const saved = await api('/api/settings', {method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)}); updateSite(saved); toast('站点信息已保存'); } catch(error){toast(error.message);} });
 $('#private-form')?.addEventListener('submit', async event => { event.preventDefault(); const size = Number($('#private-max').value); if (!Number.isInteger(size) || size<1 || size>200) {toast('文件上限需为 1–200 MB');return;} try { await api('/api/config/private', {method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify({maxFileSize:size*1048576,showOnHomepage:$('#private-homepage').checked,...processingValues('private')})}); toast('私有上传设置已保存'); await loadGallery(); } catch(error){toast(error.message);} });
-$('#username-form')?.addEventListener('submit', async event => { event.preventDefault(); try { await api('/api/admin/username', {method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify({username:$('#admin-username').value.trim()})}); toast('用户名已修改'); } catch(error){toast(error.message);} });
+$('#username-form')?.addEventListener('submit', async event => { event.preventDefault(); try { await api('/api/admin/username', {method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify({username:$('#admin-username').value.trim()})}); session.username = $('#admin-username').value.trim(); toast('用户名已修改'); } catch(error){toast(error.message);} });
 $('#hard-delete')?.addEventListener('click', async () => { if (!confirm('永久删除回收站中的图片文件？此操作无法撤销。')) return; try { const result = await api('/api/settings/hard-delete', {method:'POST'}); toast(`永久删除 ${result.deletedCount} 张图片`); await loadSettings(); } catch(error){toast(error.message);} });
 $('#clear-nsfw')?.addEventListener('click', async () => { if (!confirm('永久删除所有违规图片文件？此操作无法撤销。')) return; try { const result = await api('/api/images/nsfw-clear', {method:'POST'}); toast(`清空 ${result.deletedCount} 张违规图片`); await loadSettings(); } catch(error){toast(error.message);} });
 $('#background-url')?.addEventListener('input', previewBackground);
@@ -432,7 +440,15 @@ $('#blacklist-form')?.addEventListener('submit', async event => {
     else if (kind === 'stats') await loadStatsView();
     else if (kind === 'settings') await loadSettings();
   };
-  ready().catch(error => toast(error.message));
+  root.inert = true;
+  root.classList.add('is-loading');
+  root.setAttribute('aria-busy', 'true');
+  ready().catch(error => toast(error.message)).finally(() => {
+    if (disposed) return;
+    root.inert = false;
+    root.classList.remove('is-loading');
+    root.setAttribute('aria-busy', 'false');
+  });
   return {
     canLeave() {
       const progress = uploadQueue.snapshot();

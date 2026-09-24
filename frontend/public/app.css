@@ -51,8 +51,6 @@ main {position:relative;z-index:1;max-width:1560px;min-height:calc(100vh - 76px)
 .workspace-bar {display:flex;align-items:center;justify-content:space-between;padding-bottom:28px;margin-bottom:48px;border-bottom:1px solid var(--border);color:var(--neutral);font:11px 'JetBrains Mono',monospace;letter-spacing:.08em}
 .workspace-bar span:last-child {display:flex;align-items:center;gap:8px;color:var(--secondary)}
 .workspace-bar i {width:5px;height:5px;background:var(--success);border-radius:50%}
-.view {display:none}
-.view.active {display:block;animation:appear .2s ease-out}
 @keyframes appear {from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:translateY(0)}}
 .page-heading {margin:0 0 32px}
 .eyebrow {display:block;margin-bottom:14px;color:var(--primary);font:500 10px/1.4 'JetBrains Mono',monospace;letter-spacing:.18em}
@@ -278,8 +276,9 @@ dialog label {display:flex;flex-direction:column;gap:9px;margin:18px 0;font-size
  .public-shell .section-title {margin-bottom:28px}
  .login-card {padding:28px 24px}
  .public-shell footer {padding:20px}
- .admin-shell .nav {overflow-x:auto;justify-content:flex-start}
- .admin-shell .nav-link {flex:none;white-space:nowrap;min-height:46px}
+ .admin-shell .nav {display:grid;grid-template-columns:repeat(3,minmax(0,1fr));overflow:visible;gap:4px}
+ .admin-shell .nav-link {white-space:nowrap;min-height:44px;justify-content:flex-start}
+ html:has(.admin-shell) {scroll-padding-top:200px}
  .admin-shell .nav-link svg {display:inline-block}
 }
 @media(max-width:360px) {
@@ -290,3 +289,8 @@ dialog label {display:flex;flex-direction:column;gap:9px;margin:18px 0;font-size
  .public-header .header-login {padding:0 10px}
  .login-card {padding:24px 20px}
 }
+
+.image-preview {display:block;width:100%;padding:0;background:transparent;border:0;text-align:left}
+.image-preview:focus-visible {outline-offset:-4px}
+.page-view.is-loading {opacity:.6;transition:opacity .15s}
+.page-view[aria-busy="true"]::before {content:'正在加载…';display:block;color:var(--secondary);font-size:13px;margin-bottom:16px}

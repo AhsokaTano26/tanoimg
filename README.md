@@ -11,7 +11,7 @@
 - 可选图片压缩和 WebP/JPEG/PNG 转换；默认直存，启用处理后同一时间只解码一张
 - 可选 NSFW 后台审核（nsfwdet、Elysia Tools、自建 nsfw_detector），Webhook、Telegram、Email、Server酱通知
 - 瀑布流图库、深色模式、公告、API 指南、统计页和移动端界面
-- Crypto Blue 界面；管理员可上传背景图片、填写 HTTPS 图片地址，并调节 0–40 px 模糊度
+- 石墨深色 / 浅色界面，所有图标使用本地 Lucide；管理员可上传背景图片、填写 HTTPS 图片地址，并调节 0–40 px 模糊度
 - 导入 EasyImg 的 NeDB `images.db`、`users.db`、`apikeys.db`、`settings.db`、`moderation_tasks.db`、`ip_blacklist.db` 和 `uploads/`
 - 保留 EasyImg 的图片 UUID、记录 ID、原文件名和 `/i/<uuid>.<格式>` 直链
 
@@ -27,11 +27,11 @@
 | 图片格式与转换 | JPEG、PNG、GIF、WebP、AVIF、SVG、BMP、ICO、APNG、TIFF 可直存；JPEG/PNG/WebP 可处理，GIF/APNG 动画保持原文件 |
 | 版本检查 | 管理员手动检查 TanoImg 的 GitHub 发布版本 |
 
-原 EasyImg 页面按用途合并到“管理”及“API / 统计”页，路由和页面布局不与 Nuxt 版本逐像素相同。旧 JWT 会话不会迁移；旧账户和 API Key 会迁移。
+访客只看到公共图片页（`/`）和公共上传（`/upload`），通过 header 的登录入口进入后台。后台位于 `/admin/*`，包括图片管理、上传、回收站、统计、API 指南和设置，需管理员会话才能访问。Vue Router 的 `RouterLink` / `RouterView` 负责页面导航、刷新及浏览器前进后退；旧设置、统计和回收站链接仍会转到对应的受保护页面。旧 JWT 会话不会迁移；旧账户和 API Key 会迁移。
 
 ## 快速启动
 
-需要 Go 1.26 或 Docker。
+源码构建需要 Go 1.26、Node.js 22.12+ 和 npm，或使用 Docker。运行编译后的程序不需要 Node.js。
 
 ```bash
 export TANOIMG_ADMIN_PASSWORD='请换成强密码'
@@ -119,8 +119,18 @@ go test ./internal/app -run '^$' -bench '^BenchmarkPrivateUploadHTTP$' -benchtim
 ## 开发检查
 
 ```bash
-go test ./...
+npm ci --prefix frontend
+npm test --prefix frontend
 make build
+go test ./...
 ```
 
 `make build` 会在仓库根目录生成 `./tanoimg` 可执行文件；发布时可用 `make build VERSION=1.2.3` 注入版本号。运行时仍需设置 `TANOIMG_ADMIN_PASSWORD`，或使用已迁移的 EasyImg 管理员账户。
+
+### 前端开发
+
+Vue 单文件页面组件位于 `frontend/src/views/`，路由定义位于 `frontend/src/routes.js`；共享布局、图标和登录状态分别在组件与运行时模块中维护。页面切换不再依赖手写的 DOM 显隐和 History API。原有表单、图片操作及上传队列通过页面生命周期挂载，离开时中止请求并释放队列；上传进行中离开会先提示确认。
+
+`make build` 自动安装缺失的前端依赖并构建前端，再将产物嵌入 Go 二进制。生成目录 `internal/app/web/` 已提交，方便直接运行 Go 测试；修改前端请编辑 `frontend/` 源文件，再运行 `make build`，不要手工编辑生成目录。Docker 使用独立 Node 构建阶段，最终运行镜像仍只有 Go 程序。
+
+公共图库使用 `GET /api/images?scope=public`：即使管理员在访问，也遵循站点的公共展示规则（含管理员明确开启的“在首页展示私有图片”）。管理页使用默认管理员查询，显示全部可管理图片。

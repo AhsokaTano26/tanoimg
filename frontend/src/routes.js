@@ -24,7 +24,7 @@ export function loginDestination(value) {
 export function accessGuard(session, verify) {
   return async to => {
     if (to.meta.requiresAuth) {
-      await verify();
+      try { await verify(); } catch { session.admin = false; }
       if (!session.admin) return { name: 'login', query: { redirect: to.path }, replace: true };
     }
     if (to.name === 'login' && session.admin) return loginDestination(to.query.redirect);

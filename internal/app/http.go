@@ -116,7 +116,7 @@ func (a *App) page(w http.ResponseWriter, r *http.Request) {
 	}
 	b, err := webFiles.ReadFile("web/" + name)
 	if err != nil {
-		http.Error(w, "UI unavailable", 500)
+		http.NotFound(w, r)
 		return
 	}
 	switch path.Ext(name) {

@@ -15,7 +15,7 @@ onBeforeUnmount(() => controller?.dispose());
 <section ref="root" id="upload-view" class="page-view">
       <div class="page-heading"><span class="eyebrow">UPLOAD &amp; SHARE</span><h1>{{ admin ? "上传图片" : "公共上传" }}</h1><p>{{ admin ? "批量上传到你的图库，随时复制链接分享。" : "将图片上传至公共图库，生成可以分享的链接。" }}</p></div>
       <div id="dropzone" class="dropzone" tabindex="0" role="button" aria-label="选择图片上传">
-        <input id="file-input" type="file" accept="image/*" multiple hidden>
+        <input id="file-input" aria-label="选择上传图片文件" type="file" accept="image/*" multiple hidden>
         <div class="upload-icon" aria-hidden="true"><svg class="icon" aria-hidden="true"><use href="/icons.svg#image-up"></use></svg></div>
         <h2>将图片拖放至此</h2>
         <p>也可以选择本地图片，或直接粘贴上传</p>
