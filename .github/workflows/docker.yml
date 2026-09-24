@@ -34,6 +34,8 @@ jobs:
       - run: npm test --prefix frontend
       - run: npm run build --prefix frontend
       - run: go test ./...
+      - name: Test migration client
+        run: python3 -m unittest discover -s scripts -p 'test_migrate_easyimg.py'
 
   image:
     needs: test
