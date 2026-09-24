@@ -1,0 +1,14 @@
+services:
+  tanoimg:
+    build: .
+    ports:
+      - "3000:3000"
+    environment:
+      TANOIMG_ADMIN_PASSWORD: ${TANOIMG_ADMIN_PASSWORD:-}
+      TANOIMG_TRUST_PROXY: ${TANOIMG_TRUST_PROXY:-false}
+    volumes:
+      - tanoimg_data:/data
+    restart: unless-stopped
+
+volumes:
+  tanoimg_data:
