@@ -151,6 +151,10 @@ main { max-width: 1200px; min-height: calc(100vh - 128px); margin: auto; padding
 .stats-row strong { font-size: 24px; font-weight: 500; }
 .stats-row span { color: var(--secondary); font-size: 12px; font-weight: 500; }
 .settings-columns { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+.api-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:16px; }
+.api-grid pre { overflow-x:auto; margin:0; padding:16px; background:var(--background); border:1px solid var(--border); border-radius:8px; color:var(--text); font:13px/1.6 "JetBrains Mono",monospace; }
+.api-grid code { overflow-wrap:anywhere; }
+.metric-value { color:var(--success); font:500 24px/1.2 "JetBrains Mono",monospace; }
 .settings-panel { padding: 24px; }
 .settings-panel h2 { margin-bottom: 6px; font-size: 24px; }
 .settings-panel p { margin-bottom: 24px; color: var(--secondary); font-size: 14px; line-height: 1.5; }
@@ -238,7 +242,7 @@ dialog label { display: flex; flex-direction: column; gap: 8px; margin: 16px 0; 
 .toast.show { opacity: 1; transform: translate(-50%, 0); }
 @media (max-width: 850px) {
   .gallery-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-  .appearance-layout, .settings-columns { grid-template-columns: 1fr; }
+  .appearance-layout, .settings-columns, .api-grid { grid-template-columns: 1fr; }
 }
 @media (max-width: 600px) {
   .topbar { height: auto; min-height: 60px; grid-template-columns: 1fr auto; gap: 0 8px; padding: 0 16px; }

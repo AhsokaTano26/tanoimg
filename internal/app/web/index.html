@@ -17,6 +17,8 @@
     <nav class="nav" aria-label="主导航">
       <button class="nav-link active" data-tab="upload">上传</button>
       <button class="nav-link" data-tab="gallery">图库</button>
+      <button class="nav-link" data-tab="stats">统计</button>
+      <button class="nav-link" data-tab="api">API</button>
       <button class="nav-link" data-tab="settings">管理</button>
     </nav>
     <div class="top-actions"><button id="theme-toggle" class="account-btn" type="button" aria-label="切换深色模式">◐</button><button id="account-btn" class="account-btn">管理员登录 <span aria-hidden="true">↗</span></button></div>
@@ -48,6 +50,25 @@
       <div id="gallery-selection" class="gallery-selection" hidden><span id="selected-count">已选择 0 张</span><button id="delete-selected" class="outline-button" type="button" disabled>删除所选</button></div>
       <div id="gallery-grid" class="gallery-grid"></div>
       <div class="pagination"><button id="prev-page" class="outline-button">上一页</button><span id="page-label">第 1 页</span><button id="next-page" class="outline-button">下一页</button></div>
+    </section>
+
+    <section id="stats-view" class="view">
+      <div class="section-title"><div><h1>存储统计</h1><p>查看图片数量、磁盘占用和内容审核结果。</p></div><button id="refresh-stats" class="outline-button" type="button">刷新数据 ↻</button></div>
+      <div id="stats-locked" class="locked"><div class="lock-symbol">✳</div><h2>请先登录</h2><p>统计信息仅管理员可见。</p><button id="login-from-stats" class="primary-button" type="button">管理员登录</button></div>
+      <div id="stats-content" hidden><div class="stats-row"><div><strong id="report-total">0</strong><span>活跃图片</span></div><div><strong id="report-public">0</strong><span>公开上传</span></div><div><strong id="report-private">0</strong><span>私有上传</span></div><div><strong id="report-active-size">0 MB</strong><span>活跃空间</span></div></div><div class="stats-row"><div><strong id="report-deleted">0</strong><span>已删除图片</span></div><div><strong id="report-deleted-size">0 MB</strong><span>待清理空间</span></div><div><strong id="report-moderated">0</strong><span>已审核图片</span></div><div><strong id="report-nsfw">0</strong><span>违规图片</span></div></div><section class="settings-panel"><h2>审核违规率</h2><p><strong id="report-nsfw-rate" class="metric-value">0%</strong> 已审核图片中被标记违规的比例。</p></section></div>
+    </section>
+
+    <section id="api-view" class="view">
+      <div class="section-title"><div><h1>API 使用说明</h1><p>使用管理员会话或 API Key 批量上传与管理图片。</p></div></div>
+      <div class="api-grid"><section class="settings-panel"><h2>私有上传</h2><p>请求头传入 API Key，表单字段为 <code>file</code> 或 <code>image</code>。适合脚本和自动化客户端。</p><pre><code>curl -H 'X-API-Key: sk-...' \
+  -F 'file=@photo.jpg' \
+  https://img.example.com/api/upload/private</code></pre></section><section class="settings-panel"><h2>URL 上传</h2><p>发送一个 URL 或 URL 数组，服务端下载后保存。大量 URL 可使用流式进度接口。</p><pre><code>POST /api/upload/url
+{"url":"https://example.com/photo.jpg"}
+
+POST /api/upload/urls
+{"urls":["https://example.com/a.jpg"]}</code></pre></section><section class="settings-panel"><h2>公开上传</h2><p>管理员开启公开上传后，无须密钥。格式、大小、频率和内容审核由站点配置控制。</p><pre><code>POST /api/upload/public
+Content-Type: multipart/form-data
+file=@photo.jpg</code></pre></section><section class="settings-panel"><h2>响应与批量建议</h2><p>响应为 JSON；成功时图片信息位于 <code>data</code>。API Key 批量上传建议使用 4 路并发；收到 429 时按 Retry-After 重试。</p><pre><code>{"success":true,"data":{"url":"/i/uuid.jpg"}}</code></pre></section></div>
     </section>
 
     <section id="settings-view" class="view">

@@ -122,6 +122,7 @@ function showTab(tab) {
   document.querySelectorAll('.view').forEach(el => el.classList.toggle('active', el.id === `${tab}-view`));
   document.querySelectorAll('.nav-link').forEach(el => el.classList.toggle('active', el.dataset.tab === tab));
   if (tab === 'gallery') loadGallery();
+  if (tab === 'stats') loadStatsView();
   if (tab === 'settings') loadSettings();
   history.replaceState(null, '', tab === 'upload' ? '/' : `/${tab}`);
   window.scrollTo(0, 0);
@@ -185,10 +186,24 @@ async function loadGallery() {
   } catch (error) { toast(error.message); }
 }
 
+async function loadStatsView() {
+  await refreshAuth();
+  if (!state.admin) return;
+  try {
+    const data = await api('/api/settings/stats');
+    const numbers = {total:data.totalImages,public:data.publicImages,private:data.privateImages,deleted:data.deletedImagesCount,moderated:data.moderatedImagesCount,nsfw:data.nsfwImagesCount};
+    for (const [key, value] of Object.entries(numbers)) $(`#report-${key}`).textContent = Number(value).toLocaleString('zh-CN');
+    $('#report-active-size').textContent = `${(data.activeSize / 1048576).toFixed(1)} MB`;
+    $('#report-deleted-size').textContent = `${(data.deletedSize / 1048576).toFixed(1)} MB`;
+    $('#report-nsfw-rate').textContent = `${data.nsfwRate.toFixed(1)}%`;
+  } catch(error) { toast(error.message); }
+}
+
 async function refreshAuth() {
   try { const auth = await api('/api/auth/verify'); state.admin = true; $('#admin-username').value = auth.user.username; } catch { state.admin = false; }
   $('#account-btn').innerHTML = state.admin ? '退出登录 <span aria-hidden="true">↗</span>' : '管理员登录 <span aria-hidden="true">↗</span>';
   $('#settings-locked').hidden = state.admin; $('#settings-content').hidden = !state.admin;
+  $('#stats-locked').hidden = state.admin; $('#stats-content').hidden = !state.admin;
   $('#url-upload-panel').hidden = !state.admin;
   $('#gallery-selection').hidden = !state.admin;
   updateUploadHint();
@@ -324,10 +339,12 @@ $('#delete-selected').addEventListener('click', async () => { const ids = [...se
 $('#url-upload-form').addEventListener('submit', async event => { event.preventDefault(); if (!state.admin) return; const urls = [...new Set($('#url-list').value.split(/\r?\n/).map(x=>x.trim()).filter(Boolean))]; if (!urls.length) return; const button = event.submitter; button.disabled = true; let completed = 0, failed = 0; try { for (let start = 0; start < urls.length; start += 1000) { const chunk = urls.slice(start, start + 1000); const result = await api('/api/upload/url', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({url:chunk})}); completed += result.successCount; failed += result.errorCount; $('#url-upload-status').textContent = `${Math.min(start+chunk.length, urls.length)} / ${urls.length} · ${completed} 成功 · ${failed} 失败`; result.results.forEach(item => showUploadResult({name:item.url}, item.data, null)); result.errors.forEach(item => showUploadResult({name:item.url}, null, new Error(item.error), false)); } $('#url-list').value = ''; await loadRecent(); toast(`URL 上传完成：${completed} 成功，${failed} 失败`); } catch(error){toast(error.message);} finally {button.disabled = false;} });
 $('#account-btn').addEventListener('click', async () => { if (state.admin) { await api('/api/auth/logout',{method:'POST'}); state.admin=false; await refreshAuth(); showTab('upload'); toast('已退出登录'); } else $('#login-dialog').showModal(); });
 $('#login-from-settings').addEventListener('click', () => $('#login-dialog').showModal());
+$('#login-from-stats').addEventListener('click', () => $('#login-dialog').showModal());
+$('#refresh-stats').addEventListener('click', loadStatsView);
 $('#close-login').addEventListener('click', () => $('#login-dialog').close());
 $('#login-form').addEventListener('submit', async event => {
   event.preventDefault(); const form = new FormData(event.target); $('#login-error').textContent = '';
-  try { await api('/api/auth/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(Object.fromEntries(form))}); $('#login-dialog').close(); event.target.reset(); await refreshAuth(); toast('登录成功'); if ($('#settings-view').classList.contains('active')) loadSettings(); else loadRecent(); }
+  try { await api('/api/auth/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(Object.fromEntries(form))}); $('#login-dialog').close(); event.target.reset(); await refreshAuth(); toast('登录成功'); if ($('#settings-view').classList.contains('active')) loadSettings(); else if ($('#stats-view').classList.contains('active')) loadStatsView(); else loadRecent(); }
   catch (error) { $('#login-error').textContent = error.message; }
 });
 $('#refresh-gallery').addEventListener('click',loadGallery);
@@ -407,6 +424,6 @@ $('#blacklist-form').addEventListener('submit', async event => {
   try { const settings=await api('/api/settings/public'); if(settings.appName){$('#brand-name').textContent=settings.appName;document.title=`${settings.appName} · 图片存储`;} applyBackground(settings.backgroundUrl || '', Number(settings.backgroundBlur) || 0); applyLogo(settings.appLogo || ''); showAnnouncement(settings); } catch {}
   try { const config=await api('/api/config/public');state.publicEnabled=config.enabled;state.publicConfig=config;updateUploadHint(); } catch {}
   await refreshAuth(); await loadRecent();
-  const tab=location.pathname.slice(1); if(['gallery','settings'].includes(tab))showTab(tab);
+  const tab=location.pathname.slice(1); if(['gallery','stats','api','settings'].includes(tab))showTab(tab);
   else window.scrollTo(0, 0);
 })();
