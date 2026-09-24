@@ -168,3 +168,19 @@
 .p-select-option:not(.p-select-option-selected).p-focus {background:var(--surface-hover);color:var(--text)}
 .ui-drawer .admin-navigation .nav-link {justify-content:flex-start;min-height:44px;border-radius:8px}
 .ui-drawer .admin-navigation .nav-link.active {border:1px solid color-mix(in srgb,var(--primary) 18%,transparent)}
+.security-heading {display:flex;align-items:flex-start;justify-content:space-between;gap:20px}
+.security-heading p,.security-note {margin-bottom:0!important}
+.security-note {padding:14px 16px;background:var(--accent-soft);border-radius:8px;line-height:1.8;overflow-wrap:anywhere}
+.totp-qr {display:block;max-width:100%;height:auto;margin:0 auto;padding:12px;background:white;border-radius:12px}
+.security-secret {display:flex;flex-direction:column;align-items:flex-start;gap:12px;padding:16px;background:var(--surface-raised);border:1px solid var(--border);border-radius:8px}
+.security-secret code {font:13px 'JetBrains Mono',monospace;overflow-wrap:anywhere;max-width:100%}
+.security-secret span {font-size:12px;color:var(--secondary)}
+.recovery-code-grid {display:grid;gap:8px;padding:16px;background:var(--surface-raised);border:1px solid var(--border);border-radius:8px}
+.recovery-code-grid code {font:13px 'JetBrains Mono',monospace;text-align:center;overflow-wrap:anywhere}
+.passkey-login {display:flex;flex-direction:column;gap:16px;text-align:center}
+.passkey-login small {color:var(--secondary);font-size:12px;line-height:1.7}
+.auth-divider {display:flex;align-items:center;gap:12px;color:var(--neutral);font-size:12px}
+.auth-divider::before,.auth-divider::after {content:'';height:1px;background:var(--border);flex:1}
+@media(max-width:700px){.security-heading {flex-direction:column;gap:12px}}
+
+.account-security>.settings-panel+.settings-panel {margin-top:24px}

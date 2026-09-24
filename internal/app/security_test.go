@@ -81,7 +81,9 @@ func TestTOTPLoginAndRecovery(t *testing.T) {
 	if r := securityCall(a, "POST", "/api/auth/totp", "", body, w.Result().Cookies()...); r.Code == 200 {
 		t.Fatal("recovery code reused")
 	}
-	code, _ := totp.GenerateCode(secret, time.Now())
+	var usedStep int64
+	a.DB.QueryRow(`SELECT last_step FROM auth_totp`).Scan(&usedStep)
+	code, _ := totp.GenerateCode(secret, time.Unix(usedStep*30, 0))
 	body["code"] = code
 	if r := securityCall(a, "POST", "/api/auth/totp", "", body, w.Result().Cookies()...); r.Code == 200 {
 		t.Fatal("enrollment OTP reused")
@@ -161,5 +163,37 @@ func TestTOTPRotateDisableAndPersistentKey(t *testing.T) {
 	d := securityData(t, securityCall(a, "POST", "/api/auth/login", "", map[string]string{"username": "admin", "password": "strong-test-password"}))
 	if d["token"] == nil {
 		t.Fatal("password login not restored")
+	}
+}
+
+func TestTOTPValidCodeAndSessionRevocation(t *testing.T) {
+	a := testApp(t)
+	first := adminToken(t, a)
+	current := adminToken(t, a)
+	secret, _ := enableTestTOTP(t, a, current)
+	if w := securityCall(a, "GET", "/api/auth/verify", first, nil); w.Code != 401 {
+		t.Fatal("old session survived enrollment")
+	}
+	// Simulate enrollment in the previous time step without waiting for the wall clock.
+	if _, err := a.DB.Exec(`UPDATE auth_totp SET last_step=?`, time.Now().Unix()/30-1); err != nil {
+		t.Fatal(err)
+	}
+	w := securityCall(a, "POST", "/api/auth/login", "", map[string]string{"username": "admin", "password": "strong-test-password"})
+	d := securityData(t, w)
+	code, _ := totp.GenerateCode(secret, time.Now())
+	body := map[string]string{"challenge": d["challenge"].(string), "code": code}
+	verified := securityData(t, securityCall(a, "POST", "/api/auth/totp", "", body, w.Result().Cookies()...))
+	if verified["token"] == nil {
+		t.Fatal("valid TOTP rejected")
+	}
+}
+func TestAuthenticationRateLimit(t *testing.T) {
+	a := testApp(t)
+	for i := 0; i < 60; i++ {
+		securityCall(a, "POST", "/api/auth/login", "", map[string]string{"username": "missing", "password": "wrong"})
+	}
+	w := securityCall(a, "POST", "/api/auth/login", "", map[string]string{"username": "admin", "password": "strong-test-password"})
+	if w.Code != 429 || w.Header().Get("Retry-After") == "" {
+		t.Fatal("missing authentication rate limit", w.Code)
 	}
 }
