@@ -96,5 +96,7 @@ go test ./internal/app -run '^$' -bench '^BenchmarkPrivateUploadHTTP$' -benchtim
 
 ```bash
 go test ./...
-go build ./cmd/tanoimg
+make build
 ```
+
+`make build` 会在仓库根目录生成 `./tanoimg` 可执行文件。运行时仍需设置 `TANOIMG_ADMIN_PASSWORD`，或使用已迁移的 EasyImg 管理员账户。
