@@ -2,6 +2,8 @@
 
 使用 GitHub Actions 已发布的 Docker Hub 镜像，无需在 Zeabur 重新构建。迁移期间保留原 EasyImg 和备份，验证完成后再切换域名。
 
+也可以从本地直接调用 TanoImg 迁移 API 上传，省去手动文件管理操作：见 [远程迁移指南](remote-migration.md)。以下保留手动上传方式。
+
 ## 1. 准备完整备份
 
 停止 EasyImg 写入，备份以下目录，保持同一个时间点：

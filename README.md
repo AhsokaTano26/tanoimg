@@ -77,6 +77,8 @@ docker compose logs tanoimg
 
 ## 从 EasyImg 迁移
 
+**本地直接通过图床 API 迁移到远端：**使用 [远程迁移脚本与操作指南](docs/remote-migration.md)，支持分块续传、SHA-256 校验，并保留原图片 ID 和 `/i/` 路径。
+
 迁移后部署到 Zeabur，请按 [Zeabur 迁移部署指南](docs/zeabur.md) 操作，包含数据转换、持久卷和上传切换流程。
 
 1. 停止 EasyImg 写入，并备份原有的 `db/` 与 `uploads/`。
