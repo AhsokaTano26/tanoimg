@@ -45,7 +45,7 @@ func privateUploadConfig(a *App) uploadConfig {
 }
 
 func publicConfig(a *App) uploadConfig {
-	c := uploadConfig{Enabled: false, AllowedFormats: []string{"jpg", "jpeg", "png", "gif", "webp"}, MaxFileSize: 10 << 20, RateLimit: 10}
+	c := uploadConfig{Enabled: false, AllowedFormats: []string{"jpg", "jpeg", "png", "gif", "webp", "avif", "svg", "bmp", "ico", "apng", "tiff"}, MaxFileSize: 10 << 20, RateLimit: 10}
 	json.Unmarshal(a.setting("publicApiConfig", c), &c)
 	if c.MaxFileSize < 1 || c.MaxFileSize > 100<<20 {
 		c.MaxFileSize = 10 << 20
@@ -58,6 +58,12 @@ func privateLimit(a *App) int64 {
 }
 
 func detectFormat(head []byte) string {
+	if len(head) >= 4 && (string(head[:4]) == "II*\x00" || string(head[:4]) == "MM\x00*") {
+		return "tiff"
+	}
+	if isSVGHead(head) {
+		return "svg"
+	}
 	if len(head) >= 12 && string(head[:4]) == "RIFF" && string(head[8:12]) == "WEBP" {
 		return "webp"
 	}
@@ -177,6 +183,11 @@ func (a *App) upload(w http.ResponseWriter, r *http.Request, public bool) {
 	format := detectFormat(head[:n])
 	if format == "" {
 		fail(w, 400, "不支持的图片内容格式")
+		return
+	}
+	format, err = inspectImageFormat(f, format)
+	if err != nil {
+		fail(w, 400, err.Error())
 		return
 	}
 	if public {

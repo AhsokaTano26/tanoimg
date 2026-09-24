@@ -3,7 +3,9 @@ package app
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
 	"encoding/json"
+	"hash/crc32"
 	"io"
 	"mime/multipart"
 	"net/http"
@@ -460,5 +462,66 @@ func TestEasyImgPublicImageConversion(t *testing.T) {
 	a.Handler().ServeHTTP(rec, req)
 	if rec.Code != 200 || !strings.Contains(rec.Body.String(), `"format":"webp"`) {
 		t.Fatalf("public conversion: %d %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestEasyImgAdditionalUploadFormats(t *testing.T) {
+	if detectFormat([]byte("II*\x001234")) != "tiff" {
+		t.Fatal("TIFF not detected")
+	}
+	if detectFormat([]byte("<?xml version=\"1.0\"?><svg xmlns=\"http://www.w3.org/2000/svg\"></svg>")) != "svg" {
+		t.Fatal("SVG not detected")
+	}
+	if detectFormat([]byte("<html><svg></svg></html>")) != "" {
+		t.Fatal("HTML misdetected as SVG")
+	}
+}
+
+func TestSVGUploadAndAPNGDetection(t *testing.T) {
+	a := testApp(t)
+	token := adminToken(t, a)
+	svg := []byte(`<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16"><rect width="16" height="16"/></svg>`)
+	var body bytes.Buffer
+	form := multipart.NewWriter(&body)
+	file, _ := form.CreateFormFile("file", "icon.svg")
+	file.Write(svg)
+	form.Close()
+	req := httptest.NewRequest(http.MethodPost, "/api/upload/private", &body)
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", form.FormDataContentType())
+	rec := httptest.NewRecorder()
+	a.Handler().ServeHTTP(rec, req)
+	if rec.Code != 200 || !strings.Contains(rec.Body.String(), `"format":"svg"`) {
+		t.Fatalf("SVG upload: %d %s", rec.Code, rec.Body.String())
+	}
+	var result struct {
+		Data Image `json:"data"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &result); err != nil {
+		t.Fatal(err)
+	}
+	served := adminRequest(a, "", http.MethodGet, "/i/"+result.Data.Filename, "")
+	if served.Code != 200 || !strings.Contains(served.Header().Get("Content-Security-Policy"), "default-src 'none'") {
+		t.Fatalf("SVG serving policy: %d %s", served.Code, served.Header().Get("Content-Security-Policy"))
+	}
+	png := tinyPNG(t)
+	chunk := make([]byte, 20)
+	binary.BigEndian.PutUint32(chunk[:4], 8)
+	copy(chunk[4:8], "acTL")
+	binary.BigEndian.PutUint32(chunk[8:12], 1)
+	binary.BigEndian.PutUint32(chunk[16:], crc32.ChecksumIEEE(chunk[4:16]))
+	apng := append(append(append([]byte{}, png[:33]...), chunk...), png[33:]...)
+	path := filepath.Join(a.DataDir, "uploads", "sample-apng")
+	if err := os.WriteFile(path, apng, 0600); err != nil {
+		t.Fatal(err)
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	format, err := inspectImageFormat(f, detectFormat(apng[:33]))
+	if err != nil || format != "apng" {
+		t.Fatalf("APNG detection: %s %v", format, err)
 	}
 }

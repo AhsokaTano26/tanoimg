@@ -222,6 +222,9 @@ func (a *App) serveStoredImage(w http.ResponseWriter, r *http.Request, filename 
 	w.Header().Set("Content-Type", mimeFor(im.Format))
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.Header().Set("Content-Security-Policy", "sandbox")
+	if im.Format == "svg" {
+		w.Header().Set("Content-Security-Policy", "sandbox; default-src 'none'; img-src data:; style-src 'unsafe-inline'")
+	}
 	w.Header().Set("Cache-Control", "public, max-age=86400")
 	http.ServeContent(w, r, filename, info.ModTime(), f)
 }
@@ -232,6 +235,8 @@ func mimeFor(format string) string {
 		return "image/jpeg"
 	case "png":
 		return "image/png"
+	case "apng":
+		return "image/apng"
 	case "gif":
 		return "image/gif"
 	case "webp":

@@ -145,6 +145,10 @@ func (a *App) importRemoteImage(r *http.Request, raw, uploadedBy, uploadedByType
 	if format == "" {
 		return Image{}, errors.New("不支持的图片内容格式")
 	}
+	format, err = inspectImageFormat(f, format)
+	if err != nil {
+		return Image{}, err
+	}
 	if _, err := f.Seek(0, io.SeekStart); err != nil {
 		return Image{}, err
 	}

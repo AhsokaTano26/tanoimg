@@ -29,7 +29,7 @@ func (a *App) processImageFile(ctx context.Context, source *os.File, format stri
 	case config.ConvertToJpg:
 		target = "jpg"
 	}
-	if format == "gif" || (target == format && (!config.EnableCompression || size <= compressionThreshold)) {
+	if format == "gif" || format == "apng" || (target == format && (!config.EnableCompression || size <= compressionThreshold)) {
 		return source, format, size, nil
 	}
 	if format != "jpg" && format != "png" && format != "webp" {
