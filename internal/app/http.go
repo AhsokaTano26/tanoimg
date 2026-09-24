@@ -91,7 +91,7 @@ func (a *App) Handler() http.Handler {
 func (a *App) page(w http.ResponseWriter, r *http.Request) {
 	name := "index.html"
 	switch r.URL.Path {
-	case "/", "/login", "/gallery", "/settings", "/api", "/stats":
+	case "/", "/login", "/gallery", "/recycle", "/settings", "/api", "/stats":
 	case "/app.css":
 		name = "app.css"
 	case "/app.js":

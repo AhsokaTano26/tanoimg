@@ -120,6 +120,7 @@ main { max-width: 1200px; min-height: calc(100vh - 128px); margin: auto; padding
 .section-head { display: flex; justify-content: space-between; align-items: center; margin: 48px 0 16px; }
 .section-head h2 { margin: 0; font-size: 24px; }
 .gallery-grid { columns: 4; column-gap: 16px; }
+.gallery-grid.is-empty { columns: 1; }
 .image-card { display:inline-block; width:100%; margin:0 0 16px; vertical-align:top; break-inside:avoid; overflow: hidden; background: var(--surface); border: 1px solid var(--border); border-radius: 12px; box-shadow: 0 1px 3px #050f1a0f; transition: border-color .15s; }
 .image-card:hover { border-color: var(--primary); }
 .image-card img { display: block; width: 100%; height: auto; background: #f3f4f6; }
@@ -133,6 +134,7 @@ main { max-width: 1200px; min-height: calc(100vh - 128px); margin: auto; padding
 .image-sub { color: var(--secondary); font-size: 12px; }
 .image-actions { display: flex; flex-wrap: wrap; gap: 8px; padding: 0 16px 16px; }
 .image-actions button, .key-row button { min-height: 34px; padding: 5px 10px; background: var(--surface); border: 1px solid var(--border); border-radius: 6px; color: var(--secondary); font-size: 12px; font-weight: 500; }
+#recycle-view .image-actions button { min-height: 44px; }
 .image-actions button:hover, .key-row button:hover { border-color: var(--primary); color: var(--primary); }
 .image-actions .danger:hover, .key-row button:last-child:hover { border-color: var(--error); color: var(--error); }
 .empty { display:inline-block; width:100%; padding: 48px 20px; background: var(--surface); border: 1px dashed var(--border); border-radius: 12px; color: var(--secondary); text-align: center; }
@@ -264,6 +266,7 @@ dialog label { display: flex; flex-direction: column; gap: 8px; margin: 16px 0; 
   .image-meta { padding: 10px; }
   .image-actions { padding: 0 10px 10px; }
   .section-title h1 { font-size: 28px; }
+  .section-title { align-items:stretch; flex-direction:column; }
   .stats-row { grid-template-columns: repeat(2, 1fr); }
   .stats-row > div { padding: 16px; }
   .stats-row > div:nth-child(3) { border-left: 0; border-top: 1px solid var(--border); }

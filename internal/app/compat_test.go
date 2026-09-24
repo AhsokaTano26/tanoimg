@@ -118,6 +118,14 @@ func TestRecycleBinCanListAndRestoreImages(t *testing.T) {
 	}
 }
 
+func TestRecyclePageHasDirectEntry(t *testing.T) {
+	a := testApp(t)
+	page := adminRequest(a, "", http.MethodGet, "/recycle", "")
+	if page.Code != 200 || !strings.Contains(page.Body.String(), `id="recycle-view"`) || !strings.Contains(page.Body.String(), `id="open-recycle"`) {
+		t.Fatalf("recycle page entry: %d %s", page.Code, page.Body.String())
+	}
+}
+
 func TestEasyImgNSFWReviewAndPreview(t *testing.T) {
 	a := testApp(t)
 	token := adminToken(t, a)

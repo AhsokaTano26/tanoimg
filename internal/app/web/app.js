@@ -1,7 +1,7 @@
 import { createUploadQueue } from './upload-queue.mjs';
 
 const $ = (selector) => document.querySelector(selector);
-const state = { admin: false, page: 1, totalPages: 1, publicEnabled: false, publicConfig: null, safetyProviders: {} };
+const state = { admin: false, page: 1, totalPages: 1, recyclePage: 1, recycleTotalPages: 1, publicEnabled: false, publicConfig: null, safetyProviders: {} };
 const selectedImages = new Set();
 
 function applyTheme(theme) {
@@ -120,8 +120,9 @@ function toast(message) {
 
 function showTab(tab) {
   document.querySelectorAll('.view').forEach(el => el.classList.toggle('active', el.id === `${tab}-view`));
-  document.querySelectorAll('.nav-link').forEach(el => el.classList.toggle('active', el.dataset.tab === tab));
+  document.querySelectorAll('.nav-link').forEach(el => el.classList.toggle('active', el.dataset.tab === (tab === 'recycle' ? 'gallery' : tab)));
   if (tab === 'gallery') loadGallery();
+  if (tab === 'recycle') loadRecycle();
   if (tab === 'stats') loadStatsView();
   if (tab === 'settings') loadSettings();
   history.replaceState(null, '', tab === 'upload' ? '/' : `/${tab}`);
@@ -150,7 +151,7 @@ function imageCard(image, selectable = false) {
       label.append(checkbox, document.createTextNode('选择')); card.prepend(label);
     }
     const button = document.createElement('button'); button.className = 'danger'; button.textContent = '删除';
-    button.onclick = async () => { if (!confirm('确定删除这张图片？')) return; try { await api(`/api/images/${encodeURIComponent(image.id)}`, { method: 'DELETE' }); toast('已删除图片'); await loadGallery(); await loadRecent(); } catch (error) { toast(error.message); } };
+    button.onclick = async () => { if (!confirm('确定将这张图片移入回收站？')) return; try { await api(`/api/images/${encodeURIComponent(image.id)}`, { method: 'DELETE' }); toast('已移入回收站，可从图库右上角恢复'); await loadGallery(); await loadRecent(); } catch (error) { toast(error.message); } };
     actions.append(button);
   }
   card.append(img, meta, actions); return card;
@@ -158,6 +159,7 @@ function imageCard(image, selectable = false) {
 
 function renderImages(element, images) {
   element.replaceChildren();
+  element.classList.toggle('is-empty', !images.length);
   if (!images.length) {
     const empty = document.createElement('div'); empty.className = 'empty';
     const strong = document.createElement('strong'); strong.textContent = '这里还没有图片';
@@ -186,6 +188,56 @@ async function loadGallery() {
   } catch (error) { toast(error.message); }
 }
 
+function recycleCard(image) {
+  const card = document.createElement('article'); card.className = 'image-card';
+  const img = document.createElement('img'); img.src = image.url; img.alt = image.originalName || '已删除的图片'; img.loading = 'lazy';
+  img.onclick = () => { $('#image-detail').src = image.url; $('#image-detail').alt = img.alt; $('#image-detail-meta').textContent = image.originalName || image.filename; $('#image-dialog').showModal(); };
+  const meta = document.createElement('div'); meta.className = 'image-meta';
+  const name = document.createElement('div'); name.className = 'image-name'; name.textContent = image.originalName || image.filename;
+  const detail = document.createElement('div'); detail.className = 'image-sub'; detail.textContent = `${(image.size / 1024).toFixed(1)} KB · ${image.width || '—'} × ${image.height || '—'}`;
+  meta.append(name, detail);
+  const actions = document.createElement('div'); actions.className = 'image-actions';
+  const restore = document.createElement('button'); restore.className = 'outline-button'; restore.textContent = '恢复图片';
+  restore.onclick = async () => {
+    restore.disabled = true;
+    try { await api(`/api/images/${encodeURIComponent(image.id)}/restore`, {method:'PUT'}); toast('图片已恢复到图库'); await loadRecycle(); }
+    catch(error) { toast(error.message); restore.disabled = false; }
+  };
+  actions.append(restore); card.append(img, meta, actions); return card;
+}
+
+async function loadRecycle() {
+  const grid = $('#recycle-grid');
+  grid.classList.add('is-empty');
+  const loading = document.createElement('div'); loading.className = 'empty'; loading.textContent = '正在加载回收站…';
+  grid.replaceChildren(loading);
+  $('#recycle-page-label').textContent = '正在加载…';
+  $('#recycle-prev').disabled = true; $('#recycle-next').disabled = true;
+  await refreshAuth();
+  if (!state.admin) return;
+  try {
+    const data = await api(`/api/images/deleted?page=${state.recyclePage}&limit=20`);
+    state.recycleTotalPages = Math.max(1, data.pagination.totalPages);
+    if (state.recyclePage > state.recycleTotalPages) { state.recyclePage = state.recycleTotalPages; return loadRecycle(); }
+    grid.replaceChildren();
+    grid.classList.toggle('is-empty', !data.images.length);
+    if (!data.images.length) {
+      const empty = document.createElement('div'); empty.className = 'empty';
+      const title = document.createElement('strong'); title.textContent = '回收站为空';
+      const hint = document.createElement('span'); hint.textContent = '删除的图片会显示在这里，清空前可以恢复。';
+      empty.append(title, hint); grid.append(empty);
+    } else data.images.forEach(image => grid.append(recycleCard(image)));
+    $('#recycle-page-label').textContent = `第 ${state.recyclePage} 页 · 共 ${data.pagination.total} 张`;
+    $('#recycle-prev').disabled = state.recyclePage <= 1;
+    $('#recycle-next').disabled = state.recyclePage >= state.recycleTotalPages;
+  } catch(error) {
+    const failed = document.createElement('div'); failed.className = 'empty'; failed.textContent = '回收站加载失败，请稍后重试。';
+    grid.replaceChildren(failed);
+    $('#recycle-page-label').textContent = '加载失败';
+    toast(error.message);
+  }
+}
+
 async function loadStatsView() {
   await refreshAuth();
   if (!state.admin) return;
@@ -204,6 +256,8 @@ async function refreshAuth() {
   $('#account-btn').innerHTML = state.admin ? '退出登录 <span aria-hidden="true">↗</span>' : '管理员登录 <span aria-hidden="true">↗</span>';
   $('#settings-locked').hidden = state.admin; $('#settings-content').hidden = !state.admin;
   $('#stats-locked').hidden = state.admin; $('#stats-content').hidden = !state.admin;
+  $('#recycle-locked').hidden = state.admin; $('#recycle-content').hidden = !state.admin;
+  $('#open-recycle').hidden = !state.admin;
   $('#url-upload-panel').hidden = !state.admin;
   $('#gallery-selection').hidden = !state.admin;
   updateUploadHint();
@@ -212,13 +266,13 @@ async function refreshAuth() {
 async function loadSettings() {
   await refreshAuth(); if (!state.admin) return;
   try {
-    const [stats, config, keys, blacklist, appearance, privateConfig, nsfw, notification, recycle] = await Promise.all([api('/api/settings/stats'), api('/api/config/public'), api('/api/apikeys'), api('/api/blacklist?limit=100'), api('/api/settings'), api('/api/config/private'), api('/api/images/nsfw?limit=20'), api('/api/notification'), api('/api/images/deleted?limit=100')]);
+    const [stats, config, keys, blacklist, appearance, privateConfig, nsfw, notification] = await Promise.all([api('/api/settings/stats'), api('/api/config/public'), api('/api/apikeys'), api('/api/blacklist?limit=100'), api('/api/settings'), api('/api/config/private'), api('/api/images/nsfw?limit=20'), api('/api/notification')]);
     fillAppearance(appearance);
     $('#site-name').value = appearance.appName || 'TanoImg'; $('#site-logo').value = appearance.appLogo || ''; $('#site-url').value = appearance.siteUrl || '';
     $('#announcement-enabled').checked = !!appearance.announcement?.enabled; $('#announcement-content').value = appearance.announcement?.content || ''; $('#announcement-type').value = appearance.announcement?.displayType || 'modal';
     $('#private-max').value = Math.round(privateConfig.maxFileSize / 1048576); $('#private-homepage').checked = !!privateConfig.showOnHomepage;
     $('#private-compression').checked = !!privateConfig.enableCompression; $('#private-quality').value = privateConfig.compressionQuality || 80; $('#private-convert').value = conversionChoice(privateConfig);
-    $('#deleted-count').textContent = `回收站 ${appearance.deletedImagesCount} 张`;
+    $('#deleted-count').textContent = `待清理 ${appearance.deletedImagesCount} 张`;
     $('#stat-total').textContent = stats.totalImages; $('#stat-public').textContent = stats.publicImages;
     $('#stat-private').textContent = stats.privateImages; $('#stat-size').textContent = `${(stats.activeSize / 1048576).toFixed(1)} MB`;
     $('#public-enabled').checked = config.enabled; $('#public-max').value = Math.round(config.maxFileSize / 1048576);
@@ -243,9 +297,6 @@ async function loadSettings() {
     const unsafe = $('#nsfw-list'); unsafe.replaceChildren();
     if (!nsfw.images.length) { const note = document.createElement('p'); note.textContent = '没有违规图片。'; unsafe.append(note); }
     nsfw.images.forEach(image => { const row = document.createElement('div'); row.className = 'key-row'; const name = document.createElement('strong'); name.textContent = image.originalName || image.filename; const preview = document.createElement('button'); preview.textContent = '预览'; preview.onclick = () => { $('#image-detail').src = image.url; $('#image-detail-meta').textContent = image.originalName || image.filename; $('#image-dialog').showModal(); }; const restore = document.createElement('button'); restore.textContent = '取消违规'; restore.onclick = async () => { try { await api(`/api/images/${encodeURIComponent(image.id)}/unmark-nsfw`, {method:'PUT'}); await loadSettings(); await loadGallery(); } catch(error){toast(error.message);} }; const actions = document.createElement('div'); actions.className = 'row-actions'; actions.append(preview, restore); row.append(name, actions); unsafe.append(row); });
-    const recycled = $('#recycle-list'); recycled.replaceChildren();
-    if (!recycle.images.length) { const note = document.createElement('p'); note.textContent = '回收站为空。'; recycled.append(note); }
-    recycle.images.forEach(image => { const row = document.createElement('div'); row.className = 'key-row'; const name = document.createElement('strong'); name.textContent = image.originalName || image.filename; const preview = document.createElement('button'); preview.textContent = '预览'; preview.onclick = () => { $('#image-detail').src = image.url; $('#image-detail-meta').textContent = image.originalName || image.filename; $('#image-dialog').showModal(); }; const restore = document.createElement('button'); restore.textContent = '恢复'; restore.onclick = async () => { try { await api(`/api/images/${encodeURIComponent(image.id)}/restore`, {method:'PUT'}); await loadSettings(); await loadGallery(); toast('图片已恢复'); } catch(error){toast(error.message);} }; const actions = document.createElement('div'); actions.className = 'row-actions'; actions.append(preview, restore); row.append(name, actions); recycled.append(row); });
     const blocked = $('#blacklist-list'); blocked.replaceChildren();
     blacklist.records.forEach(record => {
       const row = document.createElement('div'); row.className = 'key-row';
@@ -335,10 +386,11 @@ $('#retry-failed').addEventListener('click', () => uploadFiles(failedFiles.splic
 $('#theme-toggle').addEventListener('click', () => { const next = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark'; localStorage.setItem('tanoimg-theme', next); applyTheme(next); });
 $('#close-image').addEventListener('click', () => $('#image-dialog').close());
 $('#close-announcement').addEventListener('click', () => $('#announcement-dialog').close());
-$('#delete-selected').addEventListener('click', async () => { const ids = [...selectedImages]; if (!ids.length || !confirm(`删除选中的 ${ids.length} 张图片？`)) return; try { const result = await api('/api/images/batch', {method:'DELETE', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ids})}); toast(`已删除 ${result.deletedCount} 张图片`); await loadGallery(); await loadRecent(); } catch(error){toast(error.message);} });
+$('#delete-selected').addEventListener('click', async () => { const ids = [...selectedImages]; if (!ids.length || !confirm(`将选中的 ${ids.length} 张图片移入回收站？`)) return; try { const result = await api('/api/images/batch', {method:'DELETE', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ids})}); toast(`已移入回收站 ${result.deletedCount} 张，可从图库右上角恢复`); await loadGallery(); await loadRecent(); } catch(error){toast(error.message);} });
 $('#url-upload-form').addEventListener('submit', async event => { event.preventDefault(); if (!state.admin) return; const urls = [...new Set($('#url-list').value.split(/\r?\n/).map(x=>x.trim()).filter(Boolean))]; if (!urls.length) return; const button = event.submitter; button.disabled = true; let completed = 0, failed = 0; try { for (let start = 0; start < urls.length; start += 1000) { const chunk = urls.slice(start, start + 1000); const result = await api('/api/upload/url', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({url:chunk})}); completed += result.successCount; failed += result.errorCount; $('#url-upload-status').textContent = `${Math.min(start+chunk.length, urls.length)} / ${urls.length} · ${completed} 成功 · ${failed} 失败`; result.results.forEach(item => showUploadResult({name:item.url}, item.data, null)); result.errors.forEach(item => showUploadResult({name:item.url}, null, new Error(item.error), false)); } $('#url-list').value = ''; await loadRecent(); toast(`URL 上传完成：${completed} 成功，${failed} 失败`); } catch(error){toast(error.message);} finally {button.disabled = false;} });
 $('#account-btn').addEventListener('click', async () => { if (state.admin) { await api('/api/auth/logout',{method:'POST'}); state.admin=false; await refreshAuth(); showTab('upload'); toast('已退出登录'); } else $('#login-dialog').showModal(); });
 $('#login-from-settings').addEventListener('click', () => $('#login-dialog').showModal());
+$('#login-from-recycle').addEventListener('click', () => $('#login-dialog').showModal());
 $('#login-from-stats').addEventListener('click', () => $('#login-dialog').showModal());
 $('#refresh-stats').addEventListener('click', loadStatsView);
 $('#check-version').addEventListener('click', async () => {
@@ -353,10 +405,15 @@ $('#check-version').addEventListener('click', async () => {
 $('#close-login').addEventListener('click', () => $('#login-dialog').close());
 $('#login-form').addEventListener('submit', async event => {
   event.preventDefault(); const form = new FormData(event.target); $('#login-error').textContent = '';
-  try { await api('/api/auth/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(Object.fromEntries(form))}); $('#login-dialog').close(); event.target.reset(); await refreshAuth(); toast('登录成功'); if ($('#settings-view').classList.contains('active')) loadSettings(); else if ($('#stats-view').classList.contains('active')) loadStatsView(); else loadRecent(); }
+  try { await api('/api/auth/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(Object.fromEntries(form))}); $('#login-dialog').close(); event.target.reset(); await refreshAuth(); toast('登录成功'); if ($('#settings-view').classList.contains('active')) loadSettings(); else if ($('#stats-view').classList.contains('active')) loadStatsView(); else if ($('#recycle-view').classList.contains('active')) loadRecycle(); else loadRecent(); }
   catch (error) { $('#login-error').textContent = error.message; }
 });
 $('#refresh-gallery').addEventListener('click',loadGallery);
+$('#open-recycle').addEventListener('click', () => { state.recyclePage = 1; showTab('recycle'); });
+$('#open-recycle-settings').addEventListener('click', () => { state.recyclePage = 1; showTab('recycle'); });
+$('#back-to-gallery').addEventListener('click', () => showTab('gallery'));
+$('#recycle-prev').addEventListener('click', () => { if (state.recyclePage > 1) { state.recyclePage--; loadRecycle(); } });
+$('#recycle-next').addEventListener('click', () => { if (state.recyclePage < state.recycleTotalPages) { state.recyclePage++; loadRecycle(); } });
 $('#prev-page').addEventListener('click',()=>{if(state.page>1){state.page--;loadGallery();}});
 $('#next-page').addEventListener('click',()=>{if(state.page<state.totalPages){state.page++;loadGallery();}});
 $('#save-public').addEventListener('click',async()=>{
@@ -433,6 +490,6 @@ $('#blacklist-form').addEventListener('submit', async event => {
   try { const settings=await api('/api/settings/public'); if(settings.appName){$('#brand-name').textContent=settings.appName;document.title=`${settings.appName} · 图片存储`;} applyBackground(settings.backgroundUrl || '', Number(settings.backgroundBlur) || 0); applyLogo(settings.appLogo || ''); showAnnouncement(settings); } catch {}
   try { const config=await api('/api/config/public');state.publicEnabled=config.enabled;state.publicConfig=config;updateUploadHint(); } catch {}
   await refreshAuth(); await loadRecent();
-  const tab=location.pathname.slice(1); if(['gallery','stats','api','settings'].includes(tab))showTab(tab);
+  const tab=location.pathname.slice(1); if(['gallery','recycle','stats','api','settings'].includes(tab))showTab(tab);
   else window.scrollTo(0, 0);
 })();
