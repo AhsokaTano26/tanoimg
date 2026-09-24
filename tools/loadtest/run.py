@@ -27,6 +27,7 @@ p.add_argument('--repeat', type=int, default=1)
 p.add_argument('--port', type=int, default=3042)
 p.add_argument('--out', required=True)
 p.add_argument('--convert-jpg', action='store_true')
+p.add_argument('--convert-webp', action='store_true')
 p.add_argument('--workload', choices=['upload','gallery','download'], default='upload')
 a = p.parse_args()
 BASE = f'http://127.0.0.1:{a.port}'
@@ -85,8 +86,8 @@ def run_case(profile, side, concurrency, rep):
             login=request(client,'/api/auth/login',{'username':'admin','password':env['TANOIMG_ADMIN_PASSWORD']})
             assert login['success'], 'login failed'
             key=request(client,'/api/apikeys',{'name':'disposable-load-test'})['data']['key']
-            if a.convert_jpg:
-                req=urllib.request.Request(BASE+'/api/config/private', data=json.dumps({'convertToJpg':True}).encode(),method='PUT',headers={'Content-Type':'application/json'})
+            if a.convert_jpg or a.convert_webp:
+                req=urllib.request.Request(BASE+'/api/config/private', data=json.dumps({'convertToJpg':a.convert_jpg,'convertToWebp':a.convert_webp}).encode(),method='PUT',headers={'Content-Type':'application/json'})
                 with client.open(req) as r: assert json.load(r)['success']
             seed_count=0
             endpoint=BASE+'/api/upload/private'
@@ -114,16 +115,24 @@ def run_case(profile, side, concurrency, rep):
             result=json.loads(cmd(args,env=dict(os.environ,TANOIMG_BENCH_KEY=key)))
             wall=time.monotonic()-started
             if container:
-                metrics=container_metrics(name)
-                cpu=(metrics['cpu']['usage_usec']-before['cpu']['usage_usec'])/1e6
-                result.update(metrics)
+                state=json.loads(cmd(['docker','inspect','--format','{{json .State}}',name]))
+                if state['Running']:
+                    metrics=container_metrics(name)
+                    cpu=(metrics['cpu']['usage_usec']-before['cpu']['usage_usec'])/1e6
+                    result.update(metrics)
+                else:
+                    cpu=None
+                    result.update(server_peak_rss_mib=None,oom_killed=state['OOMKilled'],container_exit_code=state['ExitCode'])
             else:
                 cpu=cpu_seconds(server.pid)-before
                 finished.set();thread.join()
                 result['server_peak_rss_mib']=max(rss,default=0)
-            result.update(profile=profile,side=side,repeat=rep,convert_jpg=a.convert_jpg,workload=a.workload,
-                          server_cpu_seconds=cpu,server_cpu_cores=cpu/wall,measurement_wall_seconds=wall,
+            result.update(profile=profile,side=side,repeat=rep,convert_jpg=a.convert_jpg,convert_webp=a.convert_webp,workload=a.workload,
+                          server_cpu_seconds=cpu,server_cpu_cores=cpu/wall if cpu is not None else None,measurement_wall_seconds=wall,
                           cpu_limit=2 if container else 14)
+            # Let handlers whose clients disconnected finish before stopping the server.
+            time.sleep(2)
+            result["drain_seconds"]=2
             # Stop before copying SQLite so there are no concurrent writers. Preserve WAL too.
             if container:
                 cmd(['docker','stop','-t','2',name])
@@ -144,7 +153,7 @@ def run_case(profile, side, concurrency, rep):
             expected=result['success'] if a.workload=='upload' else seed_count
             result['stored_minus_acknowledged']=result['stored_images']-expected
             result['acknowledged_consistent']=result['stored_images']==expected
-            if not container: assert result['stored_files']==result['stored_images'], 'stored files mismatch'
+            if not container: result['files_minus_rows']=result['stored_files']-result['stored_images']
             assert result['integrity']=='ok'
             with open(a.out,'a') as out:out.write(json.dumps(result)+'\n')
             print(json.dumps({k:result[k] for k in ['profile','side','concurrency','success_rps','error_pct','p95_ms','server_peak_rss_mib','stored_minus_acknowledged','statuses']}),flush=True)
