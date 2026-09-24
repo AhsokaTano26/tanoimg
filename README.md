@@ -43,11 +43,17 @@ make build
 
 在“外观与背景”中，可以从现有图库选择、上传背景图片或填写 HTTPS 图片地址，拖动滑块预览模糊度后保存。上传的背景图片使用私有上传接口，保存后其直链会作为全站背景；“恢复默认背景”会清除背景和模糊度。外部图片由访客浏览器直接加载，建议使用自己控制的 HTTPS 图片源。
 
-Docker：
+Docker 本地构建：
 
 ```bash
 TANOIMG_ADMIN_PASSWORD='请换成强密码' docker compose up -d --build
 ```
+
+## Docker Hub 自动发布与部署
+
+支持 GitHub Actions 自动测试并构建 amd64 / arm64 镜像，推送 Docker Hub。配置 `DOCKERHUB_USERNAME`、`DOCKERHUB_TOKEN` 两个 Secrets 后，镜像自动发布到 `<用户名>/tanoimg`；`main` 发布 `edge`，正式 `v*` 版本发布版本标签与 `latest`。服务器直接使用 `deploy/compose.yml` 拉取镜像，无需本地编译。
+
+完整配置、发布、更新与备份步骤见 [Docker Hub 部署说明](docs/docker-hub.md)。
 
 ## 图库与上传体验
 
