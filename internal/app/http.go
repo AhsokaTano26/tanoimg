@@ -41,7 +41,13 @@ func (a *App) Handler() http.Handler {
 	mux.HandleFunc("POST /api/upload/public", func(w http.ResponseWriter, r *http.Request) { a.upload(w, r, true) })
 	mux.HandleFunc("POST /api/upload/private", func(w http.ResponseWriter, r *http.Request) { a.upload(w, r, false) })
 	mux.HandleFunc("GET /api/images", a.images)
+	mux.HandleFunc("DELETE /api/images/batch", a.batchDeleteImages)
+	mux.HandleFunc("GET /api/images/nsfw", a.nsfwImages)
+	mux.HandleFunc("POST /api/images/nsfw-clear", a.clearNSFWImages)
+	mux.HandleFunc("GET /api/images/preview/{filename}", a.previewImage)
+	mux.HandleFunc("PUT /api/images/{id}/unmark-nsfw", a.unmarkNSFW)
 	mux.HandleFunc("DELETE /api/images/{id}", a.deleteImage)
+	mux.HandleFunc("POST /api/settings/hard-delete", a.hardDeleteImages)
 	mux.HandleFunc("GET /api/config/public", a.getPublicConfig)
 	mux.HandleFunc("PUT /api/config/public", a.putPublicConfig)
 	mux.HandleFunc("GET /api/settings/public", a.publicSettings)
@@ -166,18 +172,21 @@ func (a *App) deleteImage(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *App) imageFile(w http.ResponseWriter, r *http.Request) {
-	filename := r.PathValue("filename")
+	a.serveStoredImage(w, r, r.PathValue("filename"), false)
+}
+
+func (a *App) serveStoredImage(w http.ResponseWriter, r *http.Request, filename string, privileged bool) {
 	if !safeFilename.MatchString(filename) {
 		http.NotFound(w, r)
 		return
 	}
 	uuid := strings.TrimSuffix(filename, path.Ext(filename))
 	im, err := a.getImageByUUID(uuid)
-	if err != nil || im.IsDeleted || im.Filename != filename {
+	if err != nil || im.Filename != filename || (!privileged && im.IsDeleted) {
 		http.NotFound(w, r)
 		return
 	}
-	if im.IsNsfw {
+	if im.IsNsfw && !privileged {
 		http.Error(w, "图片不可访问", 403)
 		return
 	}
