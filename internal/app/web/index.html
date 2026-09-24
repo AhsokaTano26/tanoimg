@@ -19,7 +19,7 @@
       <button class="nav-link" data-tab="gallery">图库</button>
       <button class="nav-link" data-tab="settings">管理</button>
     </nav>
-    <button id="account-btn" class="account-btn">管理员登录 <span aria-hidden="true">↗</span></button>
+    <div class="top-actions"><button id="theme-toggle" class="account-btn" type="button" aria-label="切换深色模式">◐</button><button id="account-btn" class="account-btn">管理员登录 <span aria-hidden="true">↗</span></button></div>
   </header>
 
   <main>
@@ -38,12 +38,14 @@
         <progress id="upload-progress-bar" max="1" value="0" aria-label="批量上传进度"></progress>
       </div>
       <div id="upload-results" class="upload-results"></div>
+      <section id="url-upload-panel" class="settings-panel url-upload-panel" hidden><h2>从 URL 上传</h2><p>每行一个图片地址，下载后保存到图库。</p><form id="url-upload-form"><label class="setting-field">图片 URL<textarea id="url-list" rows="4" placeholder="https://example.com/photo.jpg" required></textarea></label><div class="inline-actions"><button class="primary-button" type="submit">开始下载</button><span id="url-upload-status" class="field-help" role="status"></span></div></form></section>
       <div class="section-head"><h2>最近上传</h2><button class="text-button" data-tab="gallery">查看图库 <span aria-hidden="true">→</span></button></div>
       <div id="recent-grid" class="gallery-grid"></div>
     </section>
 
     <section id="gallery-view" class="view">
       <div class="section-title"><div><h1>图片图库</h1><p>浏览已上传的图片，复制链接继续分享。</p></div><button id="refresh-gallery" class="outline-button">刷新图库 ↻</button></div>
+      <div id="gallery-selection" class="gallery-selection" hidden><span id="selected-count">已选择 0 张</span><button id="delete-selected" class="outline-button" type="button" disabled>删除所选</button></div>
       <div id="gallery-grid" class="gallery-grid"></div>
       <div class="pagination"><button id="prev-page" class="outline-button">上一页</button><span id="page-label">第 1 页</span><button id="next-page" class="outline-button">下一页</button></div>
     </section>
@@ -67,11 +69,14 @@
             </form>
           </div>
         </section>
+        <section class="settings-panel security-panel"><h2>站点信息与公告</h2><p>设置站点名称、Logo、对外地址与访客公告。</p><form id="site-form" class="settings-form-grid"><label class="setting-field">站点名称<input id="site-name" maxlength="100" required></label><label class="setting-field">Logo 图片 URL<input id="site-logo" placeholder="https://example.com/logo.png"></label><label class="setting-field">站点地址<input id="site-url" type="url" placeholder="https://photos.example"></label><label class="setting-field">公告内容<textarea id="announcement-content" rows="3" maxlength="4000"></textarea></label><label class="setting-switch"><span>显示公告</span><input id="announcement-enabled" type="checkbox"></label><label class="setting-field">公告形式<select id="announcement-type"><option value="banner">页面横幅</option><option value="modal">弹窗</option></select></label><button class="primary-button" type="submit">保存站点信息</button></form></section>
         <div class="settings-columns">
           <section class="settings-panel"><h2>公开上传</h2><p>允许访客无需登录上传图片。当前版本不会自动审核上传内容。</p><label class="setting-switch"><span>允许公开上传</span><input id="public-enabled" type="checkbox"></label><label class="setting-field">单张文件上限（MB）<input id="public-max" type="number" min="1" max="100" value="10"></label><button id="save-public" class="primary-button">保存设置</button></section>
           <section class="settings-panel"><h2>API 密钥</h2><p>使用 <code>X-API-Key</code> 请求头调用私有上传接口。</p><div class="key-create"><input id="key-name" placeholder="密钥名称" maxlength="60"><button id="create-key" class="primary-button">创建密钥</button></div><div id="key-list" class="key-list"></div></section>
         </div>
-        <section class="settings-panel security-panel"><h2>账户安全</h2><p>修改密码后，所有已登录设备需要重新登录。</p><form id="password-form" class="password-form"><label>当前密码<input name="oldPassword" type="password" autocomplete="current-password" required></label><label>新密码<input name="newPassword" type="password" autocomplete="new-password" minlength="8" required></label><button class="primary-button" type="submit">修改密码</button></form></section>
+        <section class="settings-panel security-panel"><h2>私有上传</h2><p>管理员和 API Key 上传的大小限制及首页展示。</p><form id="private-form" class="password-form"><label>单张文件上限（MB）<input id="private-max" type="number" min="1" max="200" required></label><label class="setting-switch"><span>在首页展示私有图片</span><input id="private-homepage" type="checkbox"></label><button class="primary-button" type="submit">保存私有上传设置</button></form></section>
+        <section class="settings-panel security-panel"><h2>账户安全</h2><p>可修改用户名与密码。修改密码后所有设备需要重新登录。</p><form id="username-form" class="password-form"><label>管理员用户名<input id="admin-username" minlength="3" maxlength="64" required></label><button class="outline-button" type="submit">修改用户名</button></form><form id="password-form" class="password-form spaced-form"><label>当前密码<input name="oldPassword" type="password" autocomplete="current-password" required></label><label>新密码<input name="newPassword" type="password" autocomplete="new-password" minlength="8" required></label><button class="primary-button" type="submit">修改密码</button></form></section>
+        <section class="settings-panel security-panel"><h2>存储清理与违规图片</h2><p>软删除图片保留文件；清空回收站会永久移除文件。违规图片仅管理员可预览。</p><div class="inline-actions"><span id="deleted-count">回收站 0 张</span><button id="hard-delete" class="outline-button danger-button" type="button">清空回收站</button><button id="clear-nsfw" class="outline-button danger-button" type="button">清空违规图片</button></div><div id="nsfw-list" class="key-list"></div></section>
         <section class="settings-panel security-panel"><h2>IP 黑名单</h2><p>被拦截的地址不能使用公开上传。迁移来的黑名单会显示在这里。</p><form id="blacklist-form" class="password-form"><label>IP 地址<input name="ip" placeholder="192.0.2.10" required></label><label>原因<input name="reason" placeholder="可选"></label><button class="primary-button" type="submit">添加地址</button></form><div id="blacklist-list" class="key-list"></div></section>
       </div>
     </section>
@@ -80,6 +85,9 @@
   <footer> TanoImg <span>轻巧、独立的图片存储</span></footer>
 
   <dialog id="login-dialog"><form id="login-form" method="dialog"><button type="button" id="close-login" class="dialog-close" aria-label="关闭">×</button><div class="dialog-symbol">T</div><h2>欢迎回来</h2><p>登录后管理图片和上传设置。</p><label>用户名<input name="username" autocomplete="username" required></label><label>密码<input name="password" type="password" autocomplete="current-password" required></label><button type="submit" class="primary-button full">登录</button><div id="login-error" class="form-error" role="alert"></div></form></dialog>
+  <dialog id="image-dialog" class="image-dialog"><button id="close-image" type="button" class="dialog-close" aria-label="关闭图片预览">×</button><img id="image-detail" alt=""><div id="image-detail-meta"></div></dialog>
+  <dialog id="announcement-dialog"><button id="close-announcement" type="button" class="dialog-close" aria-label="关闭公告">×</button><h2>站点公告</h2><p id="announcement-modal-content"></p></dialog>
+  <div id="announcement-banner" class="announcement-banner" hidden></div>
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
   <script type="module" src="/app.js"></script>
 </body>

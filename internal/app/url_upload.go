@@ -229,19 +229,19 @@ func (a *App) uploadURL(w http.ResponseWriter, r *http.Request) {
 	for _, raw := range urls {
 		im, err := a.importRemoteImage(r, raw, name, kind, maxSize)
 		if err != nil {
-			errors = append(errors, map[string]any{"success": false, "error": err.Error()})
+			errors = append(errors, map[string]any{"success": false, "url": raw, "error": err.Error()})
 			continue
 		}
 		data := map[string]any{"id": im.ID, "uuid": im.UUID, "filename": im.Filename, "format": im.Format, "size": im.Size, "width": im.Width, "height": im.Height, "url": im.URL, "uploadedAt": im.UploadedAt, "uploadedByType": im.UploadedByType}
 		if body.ReturnBase64 {
 			b, err := os.ReadFile(filepath.Join(a.DataDir, "uploads", im.Filename))
 			if err != nil {
-				errors = append(errors, map[string]any{"success": false, "error": "读取 Base64 图片失败"})
+				errors = append(errors, map[string]any{"success": false, "url": raw, "error": "读取 Base64 图片失败"})
 				continue
 			}
 			data["base64"] = base64.StdEncoding.EncodeToString(b)
 		}
-		results = append(results, map[string]any{"success": true, "data": data})
+		results = append(results, map[string]any{"success": true, "url": raw, "data": data})
 	}
 	if array {
 		ok(w, map[string]any{"results": results, "errors": errors, "total": len(urls), "successCount": len(results), "errorCount": len(errors)})
