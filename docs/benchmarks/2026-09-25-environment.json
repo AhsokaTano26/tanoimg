@@ -1,0 +1,42 @@
+{
+  "date": "2026-09-25",
+  "application_commit": "292fd2bb8702",
+  "os": "macOS-26.6.2-arm64-arm-64bit-Mach-O",
+  "native_cpu": "Apple M4 Pro, 14 cores",
+  "host_memory_gib": 24,
+  "docker_vm_memory_bytes": 8216756224,
+  "container_cpu_limit": 2,
+  "container_memory_limits_gib": [
+    1,
+    2
+  ],
+  "container_swap": false,
+  "native_storage": "local APFS",
+  "container_storage": "Docker Desktop anonymous volume in Linux VM",
+  "transport": "HTTP/1.1 keep-alive, loopback; Docker published loopback port for containers",
+  "duration_seconds": 8,
+  "concurrency": [
+    1,
+    4,
+    16,
+    32,
+    64,
+    128
+  ],
+  "network": "not a WAN or Zeabur test",
+  "binaries": {
+    "tanoimg": "c67a372cb2b3bbaf35b400cbec13946c969dd0f9e81cafcb0d166becdc5cd523",
+    "tanoimg-perf-linux": "cd7ccd768fe184862e698243f194201124ad1825141965b3452c1b2fa764332d",
+    "tanoimg-loadtest": "4d5b1372f0cfba2376f40d2b1885e8f30dc3147b51df77c76d51cda5d0f70252"
+  },
+  "go_version": "go version go1.26.2 darwin/arm64",
+  "runtime_env_overrides": {
+    "GOMAXPROCS": null,
+    "GOMEMLIMIT": null,
+    "GOGC": null
+  },
+  "harness_commits": [
+    "efd715a",
+    "fe43582"
+  ]
+}
