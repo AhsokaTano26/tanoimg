@@ -68,6 +68,12 @@
 .image-select .ui-checkbox>span {overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .image-actions .ui-button {font-size:11px;min-height:38px;padding:8px 10px;gap:5px}
 .visibility-tag {display:inline-block;margin-left:8px;font-size:10px;color:var(--primary)}
+.gallery-selection {flex-wrap:wrap;justify-content:flex-start}
+.gallery-selection>.ui-select {width:160px;flex:none}
+.image-metadata-form {display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;margin-top:22px;padding-top:20px;border-top:1px solid var(--border)}
+.image-metadata-form label {display:grid;gap:7px;font-size:12px;color:var(--secondary)}
+.image-metadata-form>.ui-button {justify-self:start}
+@media(max-width:640px) {.image-metadata-form {grid-template-columns:1fr}.gallery-selection>.ui-select {width:100%}}
 .upload-panel {margin-bottom:32px;border:1px solid var(--border);border-radius:14px;padding:32px;background:var(--surface);transition:border-color .16s}
 .upload-panel.dragging {border-color:var(--primary);background:var(--surface-raised)}
 .upload-panel-heading {display:flex;justify-content:space-between;gap:24px;align-items:center}
