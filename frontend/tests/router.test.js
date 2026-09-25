@@ -6,7 +6,7 @@ import { accessGuard, routeRecords, loginDestination, settingsPaths } from '../s
 function setup(authenticated = false) {
   const session = { admin: authenticated };
   const component = { render() {} };
-  const views = Object.fromEntries(['gallery', 'upload', 'login', 'layout', 'notFound', 'recycle', 'stats', 'api', 'settings', 'publicAlbums', 'albums'].map(name => [name, component]));
+  const views = Object.fromEntries(['gallery', 'upload', 'login', 'layout', 'notFound', 'recycle', 'stats', 'transfer', 'api', 'settings', 'publicAlbums', 'albums'].map(name => [name, component]));
   const router = createRouter({ history: createMemoryHistory(), routes: routeRecords(views) });
   router.beforeEach(accessGuard(session, async () => session.admin));
   return { router, session };
@@ -19,7 +19,7 @@ test('guests can browse images and upload; all admin routes require login', asyn
     if(path==='/upload') assert.equal(router.currentRoute.value.hash, '#public-upload');
     assert.equal(router.currentRoute.value.meta.requiresAuth, undefined);
   }
-  for (const name of ['gallery', 'upload', 'recycle', 'stats', 'api', 'albums', ...settingsPaths]) {
+  for (const name of ['gallery', 'upload', 'recycle', 'stats', 'transfer', 'api', 'albums', ...settingsPaths]) {
     await router.push('/admin/' + name);
     assert.equal(router.currentRoute.value.name, 'login');
     assert.equal(router.currentRoute.value.query.redirect, '/admin/' + name);

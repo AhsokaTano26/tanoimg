@@ -5,6 +5,7 @@ export const workspaceLinks=[
  {path:'/admin/shares',name:'分享管理',icon:'link'},
  {path:'/admin/albums',name:'相册管理',icon:'images'},
  {path:'/admin/stats',name:'存储统计',icon:'chart-no-axes-combined'},
+ {path:'/admin/transfer',name:'传输用量',icon:'chart-no-axes-combined'},
  {path:'/admin/api',name:'API 文档',icon:'code-xml'},
 ];
 export const settingsLinks=[

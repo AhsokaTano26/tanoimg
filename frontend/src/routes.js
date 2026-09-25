@@ -1,5 +1,5 @@
 export const settingsPaths=['appearance','site','public-upload','private-upload','apikeys','embed-templates','moderation','moderation-images','notification','account','blacklist','storage','operations','about'];
-const adminPaths=['gallery','upload','recycle','stats','api','shares','albums',...settingsPaths];
+const adminPaths=['gallery','upload','recycle','stats','transfer','api','shares','albums',...settingsPaths];
 export function routeRecords(views) {
  return [
   {path:'/',name:'home',component:views.gallery},

@@ -9,7 +9,7 @@ export const router=createRouter({
  history:createWebHistory(),
  routes:routeRecords({
   gallery:GalleryView,login:LoginView,layout:AdminLayout,notFound:NotFoundView,share:()=>import('./views/ShareView.vue'),imageDetail:()=>import('./views/ImageDetailView.vue'),
-  upload:()=>import('./views/UploadView.vue'),recycle:()=>import('./views/RecycleView.vue'),stats:()=>import('./views/StatsView.vue'),api:()=>import('./views/ApiView.vue'),
+  upload:()=>import('./views/UploadView.vue'),recycle:()=>import('./views/RecycleView.vue'),stats:()=>import('./views/StatsView.vue'),transfer:()=>import('./views/TransferView.vue'),api:()=>import('./views/ApiView.vue'),
   appearance:()=>import('./views/settings/AppearanceView.vue'),site:()=>import('./views/settings/SiteView.vue'),
   'public-upload':()=>import('./views/settings/UploadSettingsView.vue'),'private-upload':()=>import('./views/settings/UploadSettingsView.vue'),
   apikeys:()=>import('./views/settings/KeysView.vue'),moderation:()=>import('./views/settings/ModerationView.vue'),

@@ -206,7 +206,7 @@ func TestFrontendEntryModuleIsServed(t *testing.T) {
 func TestNewAdminPageReloadsRequireSession(t *testing.T) {
 	a := testApp(t)
 	token := adminToken(t, a)
-	for _, path := range []string{"/admin/albums", "/admin/shares", "/admin/operations", "/admin/embed-templates"} {
+	for _, path := range []string{"/admin/albums", "/admin/shares", "/admin/operations", "/admin/embed-templates", "/admin/transfer"} {
 		guest := adminRequest(a, "", http.MethodGet, path, "")
 		if guest.Code != http.StatusSeeOther {
 			t.Fatalf("guest page %s: %d", path, guest.Code)
