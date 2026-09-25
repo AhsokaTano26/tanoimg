@@ -111,7 +111,7 @@ Docker 部署也可以用 `docker compose run --rm -v /path/to/easyimg:/old:ro t
 | `POST /api/upload/url`、`POST /api/upload/urls` | 管理员或 API Key 上传远程图片；后者使用 SSE 返回进度 |
 | `GET /api/images?page=1&limit=20` | 分页图库；匿名用户只见公开图片 |
 | `GET /api/images/{id}` | 图片详情；遵守公开、不列出、私人三种可见性 |
-| `GET /api/images/export` | 管理员流式导出图片与元数据 |
+| `GET /api/images/export?id=<id>` | 管理员流式导出所选原图 ZIP（1–1000 张） |
 | `GET /i/<uuid>.<格式>` | 图片直链 |
 | `GET /t/<uuid>.<格式>` | 缓存的 320 像素缩略图；JPEG、PNG、GIF/APNG 可生成，其余格式返回 415，访问权限与原图一致 |
 | `POST /api/admin/images/<id>/replace` | 管理员原位替换；格式须与原图相同，ID、UUID 和 `/i/` 路径不变 |
