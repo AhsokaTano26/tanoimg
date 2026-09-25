@@ -4,6 +4,7 @@ import {useRoute,useRouter} from 'vue-router';
 import Icon from './components/Icon.vue';
 import AdminNavigation from './components/AdminNavigation.vue';
 import GlobalDialogs from './components/GlobalDialogs.vue';
+import AnnouncementContent from './components/AnnouncementContent.vue';
 import {session,site,notice,request,loadSite,toast} from './runtime.js';
 const route=useRoute(),router=useRouter();
 const adminArea=computed(()=>!!route.meta.requiresAuth && session.admin);
@@ -24,8 +25,8 @@ onMounted(loadSite);
     <UiButton v-if="adminArea" class="mobile-menu-button" icon="sliders-horizontal" @click="navigationOpen=true">导航与设置</UiButton>
   </header>
   <UiDrawer v-model:visible="navigationOpen"><AdminNavigation @navigate="navigationOpen=false" /></UiDrawer>
-  <main><div v-if="adminArea" class="workspace-bar"><span>ADMIN WORKSPACE</span><span>{{ session.username }}</span></div><div v-if="announcement?.displayType==='banner'" class="site-announcement">{{ announcement.content }}</div><RouterView v-slot="{Component,route:current}"><Transition name="page" mode="out-in"><component :is="Component" :key="current.path" /></Transition></RouterView></main>
+  <main><div v-if="adminArea" class="workspace-bar"><span>ADMIN WORKSPACE</span><span>{{ session.username }}</span></div><div v-if="announcement?.displayType==='banner'" class="site-announcement"><AnnouncementContent :content="announcement.content" /></div><RouterView v-slot="{Component,route:current}"><Transition name="page" mode="out-in"><component :is="Component" :key="current.path" /></Transition></RouterView></main>
   <footer><span>{{ site.appName }} / IMAGE STORAGE</span><span>影像有序，灵感无界。</span></footer>
-  <UiDialog v-model:visible="announcementVisible" title="站点公告"><p class="announcement-content">{{ announcement?.content }}</p></UiDialog>
+  <UiDialog v-model:visible="announcementVisible" title="站点公告"><AnnouncementContent :content="announcement?.content || ''" /></UiDialog>
   <GlobalDialogs /><div class="toast" :class="{show:notice.visible}" role="status" aria-live="polite">{{ notice.message }}</div>
 </div></template>
