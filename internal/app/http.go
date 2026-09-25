@@ -67,6 +67,7 @@ func (a *App) Handler() http.Handler {
 	mux.HandleFunc("POST /api/upload/url", a.uploadURL)
 	mux.HandleFunc("POST /api/upload/urls", a.uploadURLs)
 	mux.HandleFunc("GET /api/images", a.images)
+	mux.HandleFunc("GET /api/images/{id}", a.imageDetail)
 	mux.HandleFunc("GET /api/images/export", a.exportImages)
 	mux.HandleFunc("POST /api/images/export", a.exportImages)
 	mux.HandleFunc("GET /api/images/deleted", a.deletedImages)
@@ -152,6 +153,9 @@ func (a *App) page(w http.ResponseWriter, r *http.Request) {
 			break
 		}
 		if strings.HasPrefix(r.URL.Path, "/albums/") && strings.Count(r.URL.Path, "/") == 2 && len(r.URL.Path) > len("/albums/") {
+			break
+		}
+		if strings.HasPrefix(r.URL.Path, "/image/") && strings.Count(r.URL.Path, "/") == 2 && len(r.URL.Path) > len("/image/") {
 			break
 		}
 		name = strings.TrimPrefix(r.URL.Path, "/")
