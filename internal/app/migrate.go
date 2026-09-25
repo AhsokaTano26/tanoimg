@@ -85,7 +85,7 @@ func (a *App) MigrateEasyImg(root string) (MigrationReport, error) {
 				if doc["enabled"] != nil {
 					enabled = boolVal(doc["enabled"])
 				}
-				_, err = a.DB.Exec(`INSERT INTO apikeys(id,key,name,enabled,is_default,created_at) VALUES(?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET key=excluded.key,name=excluded.name,enabled=excluded.enabled,is_default=excluded.is_default`, id, key, str(doc["name"]), enabled, boolVal(doc["isDefault"]), str(doc["createdAt"]))
+				_, err = a.DB.Exec(`INSERT INTO apikeys(id,key,key_hash,key_hint,name,enabled,is_default,created_at) VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET name=excluded.name,enabled=excluded.enabled,is_default=excluded.is_default`, id, "__hashed__:"+id, tokenHash(key), keyHint(key), str(doc["name"]), enabled, boolVal(doc["isDefault"]), str(doc["createdAt"]))
 				report.APIKeys++
 			case "settings":
 				key := str(doc["key"])

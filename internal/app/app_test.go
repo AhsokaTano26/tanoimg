@@ -260,6 +260,10 @@ func TestMigrationPreservesLoginAndAPIKey(t *testing.T) {
 	if _, err := a.MigrateEasyImg(old); err != nil {
 		t.Fatal(err)
 	}
+	var storedKey, storedHash string
+	if err := a.DB.QueryRow(`SELECT key,key_hash FROM apikeys WHERE id='key-1'`).Scan(&storedKey, &storedHash); err != nil || storedKey == "sk-old-key" || storedHash != tokenHash("sk-old-key") {
+		t.Fatalf("migrated key was not stored as a digest: %q %q %v", storedKey, storedHash, err)
+	}
 	login := httptest.NewRecorder()
 	a.Handler().ServeHTTP(login, httptest.NewRequest("POST", "/api/auth/login", strings.NewReader(`{"username":"easyimg","password":"migrated-password"}`)))
 	if login.Code != 200 {
@@ -277,6 +281,12 @@ func TestMigrationPreservesLoginAndAPIKey(t *testing.T) {
 	a.Handler().ServeHTTP(rec, req)
 	if rec.Code != 200 {
 		t.Fatalf("migrated API key: %d %s", rec.Code, rec.Body.String())
+	}
+	if _, err := a.MigrateEasyImg(old); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.DB.QueryRow(`SELECT key,key_hash FROM apikeys WHERE id='key-1'`).Scan(&storedKey, &storedHash); err != nil || storedKey == "sk-old-key" || storedHash != tokenHash("sk-old-key") {
+		t.Fatalf("rerun exposed key: %q %q %v", storedKey, storedHash, err)
 	}
 }
 

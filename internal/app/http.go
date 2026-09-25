@@ -115,7 +115,9 @@ func (a *App) Handler() http.Handler {
 	a.registerTurnstileRoutes(mux)
 	a.registerResumableUploadRoutes(mux)
 	a.registerEmbedTemplateRoutes(mux)
-	return a.auditHandler(a.maintenanceHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	a.registerTransferStatsRoutes(mux)
+	a.registerOpenAPIRoutes(mux)
+	return a.wrapTransferMetrics(a.auditHandler(a.maintenanceHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet && r.Method != http.MethodHead && r.Method != http.MethodOptions {
 			if origin := r.Header.Get("Origin"); origin != "" {
 				u, err := url.Parse(origin)
@@ -126,7 +128,7 @@ func (a *App) Handler() http.Handler {
 			}
 		}
 		mux.ServeHTTP(w, r)
-	})))
+	}))))
 }
 
 func (a *App) page(w http.ResponseWriter, r *http.Request) {

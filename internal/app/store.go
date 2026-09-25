@@ -281,7 +281,13 @@ func (a *App) Close() error {
 		a.notifyCancel()
 		<-a.notifyDone
 	}
-	return a.DB.Close()
+	flushErr := a.flushTransferMetrics()
+	transferCollectors.Delete(a)
+	closeErr := a.DB.Close()
+	if flushErr != nil {
+		return flushErr
+	}
+	return closeErr
 }
 
 func (a *App) setting(key string, fallback any) json.RawMessage {
