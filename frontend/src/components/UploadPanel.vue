@@ -26,6 +26,7 @@ const newUploadKey=()=>`up_${[...crypto.getRandomValues(new Uint8Array(16))].map
 function setStage(item,stage,done=0,total=item.file?.size||0){activeStages.value={...activeStages.value,[item.key]:{name:item.name,stage,done,total}};}
 function clearStage(item){const next={...activeStages.value};delete next[item.key];activeStages.value=next;}
 async function reconcileKeys(keys,signal){return (await request('/api/uploads/reconcile',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({keys}),signal})).results||[];}
+async function reconcileMany(keys){const results=[];for(let start=0;start<keys.length;start+=1000)results.push(...await reconcileKeys(keys.slice(start,start+1000)));return results;}
 const recoveredImage=result=>({id:result.imageId,url:result.url,__reconciled:true});
 let disposed=false;
 function pause(ms,signal){return new Promise((resolve,reject)=>{const abort=()=>{clearTimeout(timer);reject(new DOMException("上传已取消","AbortError"));};const timer=setTimeout(()=>{signal.removeEventListener("abort",abort);resolve();},ms);signal.addEventListener("abort",abort,{once:true});if(signal.aborted)abort();});}
@@ -135,7 +136,7 @@ async function reconcileFailed(retryUnknown=false){
   reconciling.value=true;reconcileError.value='';
   try{
     const regular=failures.value.filter(item=>!item.resumable);
-    const states=regular.length?await reconcileKeys(regular.map(item=>item.key)):[];
+    const states=regular.length?await reconcileMany(regular.map(item=>item.key)):[];
     const byKey=new Map(states.map(state=>[state.key,state]));
     const retryItems=[],remaining=[];
     for(const item of failures.value){

@@ -1,10 +1,11 @@
 <script setup>
-import { computed, onMounted, ref, watch } from 'vue';
+import { computed, defineAsyncComponent, onMounted, ref, watch } from 'vue';
 import { useRouter } from 'vue-router';
 import { request, session, site, toast, updateSite } from '../runtime.js';
 import { ask } from '../dialogs.js';
 import { imageLinks } from '../image-links.js';
 import { renderEmbedTemplate } from '../embed-templates.js';
+const ImageEditor=defineAsyncComponent(()=>import('./ImageEditor.vue'));
 const props = defineProps({ images:Array, busy:Boolean, error:String, selectable:Boolean, recycle:Boolean });
 const emit = defineEmits(['refresh']);
 const router = useRouter();
@@ -21,6 +22,9 @@ watch(() => props.images, images => { const ids=new Set((images || []).map(image
 const menu = ref();
 const current = ref(null);
 const preview = ref(false);
+const editorVisible=ref(false),editorImage=ref(null);
+function openEditor(image=current.value){if(!image || props.recycle)return;editorImage.value=image;preview.value=false;editorVisible.value=true;}
+function editorSaved(image){if(image.id===current.value?.id)current.value=image;emit('refresh');}
 const copying = async format => {
   try { const value=typeof format==='string' ? imageLinks(current.value,location.origin)[format] : renderEmbedTemplate(format,current.value,location.origin);await navigator.clipboard.writeText(value); toast((typeof format==='string'?format:format.name)+' 已复制'); }
   catch { toast('复制失败，请检查浏览器剪贴板权限'); }
@@ -124,6 +128,7 @@ async function sendReport() {
 }
 const items = computed(() => [
   {label:'查看详情',symbol:'arrow-up-right',command:()=>router.push(`/image/${encodeURIComponent(current.value.id)}`)},
+  {label:'编辑图片',symbol:'sliders-horizontal',command:()=>openEditor()},
   ...((embedTemplates.value || ['直链','HTML','Markdown','BBCode'].map(label=>({name:label,legacy:true}))).map(template=>({label:template.name,symbol:template.name==='直链'?'link':'code-xml',command:()=>copying(template.legacy?template.name:template)}))),
   {separator:true},
   {label:'设为全局背景',symbol:'images',disabled:!session.admin,command:()=>setAppearance('backgroundUrl')},
@@ -188,7 +193,8 @@ function openPreview(image) { current.value=image;metadata.value={alt:image.alt|
     </article>
   </div>
   <UiMenu ref="menu" :items="items" />
-  <UiDialog v-model:visible="preview" title="图片预览" width="1000px"><img v-if="current" class="preview-image" :src="imageSrc(current)" :alt="current.alt || current.originalName"><p class="field-help">{{ current?.originalName }}</p><div v-if="selectable && session.admin" class="image-metadata-form"><label>替代文字<UiInput v-model="metadata.alt" maxlength="500" /></label><label>作者<UiInput v-model="metadata.author" maxlength="200" /></label><label>授权方式<UiInput v-model="metadata.license" maxlength="200" /></label><label>标签（以逗号分隔）<UiInput v-model="metadata.tags" maxlength="500" /></label><UiButton variant="primary" @click="saveMetadata">保存信息</UiButton></div><section v-if="selectable && session.admin && !recycle" class="image-metadata-form"><div><strong>替换与历史版本</strong><p class="field-help">替换文件必须与原图格式一致；原直链保持不变。</p></div><UiFile label="选择替换图片" :disabled="replaceBusy || versionBusy" @select="replaceImage" /><p v-if="lifecycleError" role="alert" class="form-error">{{ lifecycleError }}</p><div class="image-version-list"><p v-if="versionBusy" role="status">正在读取历史版本…</p><p v-else-if="!versions.length" class="field-help">暂无可恢复的历史版本。</p><article v-for="version in versions" :key="version.id"><span>版本 {{ version.revision }} · {{ version.originalName }} · {{ (version.size/1048576).toFixed(2) }} MB<br><small>{{ version.createdAt }}</small></span><UiButton :disabled="versionBusy || replaceBusy" @click="rollbackVersion(version)">恢复此版本</UiButton></article></div></section></UiDialog>
+  <UiDialog v-model:visible="preview" title="图片预览" width="1000px"><img v-if="current" class="preview-image" :src="imageSrc(current)" :alt="current.alt || current.originalName"><p class="field-help">{{ current?.originalName }}</p><UiButton v-if="!recycle" icon="sliders-horizontal" @click="openEditor(current)">裁剪 / 旋转 / 涂黑</UiButton><div v-if="selectable && session.admin" class="image-metadata-form"><label>替代文字<UiInput v-model="metadata.alt" maxlength="500" /></label><label>作者<UiInput v-model="metadata.author" maxlength="200" /></label><label>授权方式<UiInput v-model="metadata.license" maxlength="200" /></label><label>标签（以逗号分隔）<UiInput v-model="metadata.tags" maxlength="500" /></label><UiButton variant="primary" @click="saveMetadata">保存信息</UiButton></div><section v-if="selectable && session.admin && !recycle" class="image-metadata-form"><div><strong>替换与历史版本</strong><p class="field-help">替换文件必须与原图格式一致；原直链保持不变。</p></div><UiFile label="选择替换图片" :disabled="replaceBusy || versionBusy" @select="replaceImage" /><p v-if="lifecycleError" role="alert" class="form-error">{{ lifecycleError }}</p><div class="image-version-list"><p v-if="versionBusy" role="status">正在读取历史版本…</p><p v-else-if="!versions.length" class="field-help">暂无可恢复的历史版本。</p><article v-for="version in versions" :key="version.id"><span>版本 {{ version.revision }} · {{ version.originalName }} · {{ (version.size/1048576).toFixed(2) }} MB<br><small>{{ version.createdAt }}</small></span><UiButton :disabled="versionBusy || replaceBusy" @click="rollbackVersion(version)">恢复此版本</UiButton></article></div></section></UiDialog>
+  <ImageEditor v-if="editorVisible" v-model:visible="editorVisible" :image="editorImage" :admin="session.admin" @saved="editorSaved" />
   <UiDialog v-model:visible="shareDialog" :title="createdShareUrl?'分享已创建':'创建图片分享'">
     <div v-if="createdShareUrl" class="form-stack"><p>分享链接仅在创建时显示，请现在保存。</p><label class="form-field"><span>分享链接</span><UiInput :model-value="createdShareUrl" readonly aria-label="新建分享链接" /></label><div class="inline-actions"><UiButton icon="link" variant="primary" @click="copyShareUrl">复制链接</UiButton><UiButton @click="shareDialog=false">完成</UiButton></div></div>
     <form v-else class="form-stack" @submit.prevent="createShare"><p>将 {{ selected.length }} 张图片放入一个分享页。链接可访问这些图片，包括不公开列出和仅自己可见的图片。</p><label class="form-field"><span>标题</span><UiInput v-model="shareTitle" :maxlength="200" aria-label="分享标题" placeholder="可选" /></label><label class="form-field"><span>有效期</span><UiSelect v-model="shareExpiry" :options="[{label:'长期有效',value:0},{label:'1 天',value:1},{label:'7 天',value:7},{label:'30 天',value:30},{label:'365 天',value:365}]" aria-label="分享有效期" /></label><p v-if="shareError" role="alert" class="form-error">{{ shareError }}</p><UiButton type="submit" variant="primary" :loading="creatingShare" :disabled="!selected.length">创建分享</UiButton></form>
