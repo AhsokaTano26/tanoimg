@@ -10,7 +10,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"mime"
 	"net"
 	"net/http"
 	"net/textproto"
@@ -163,7 +162,9 @@ func (a *App) testNotification(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *App) enqueueNotification(kind, title, message string, data map[string]any) {
-	if !a.notifyEnabled.Load() { return }
+	if !a.notifyEnabled.Load() {
+		return
+	}
 	c := a.notificationSettings()
 	if !c.Enabled || !(kind == "login" && c.Types.Login || kind == "upload" && c.Types.Upload || kind == "nsfw" && c.Types.NSFW) {
 		return
@@ -412,7 +413,11 @@ func sendEmail(ctx context.Context, c notificationConfig, payload notificationPa
 		return err
 	}
 	writer := protocol.DotWriter()
-	message := "From: " + c.Email.User + "\r\nTo: " + to + "\r\nSubject: " + mime.BEncoding.Encode("UTF-8", payload.Title) + "\r\nMIME-Version: 1.0\r\nContent-Type: text/plain; charset=UTF-8\r\n\r\n" + payload.Message
+	message, err := buildNotificationEmail(c.Email.User, to, payload)
+	if err != nil {
+		writer.Close()
+		return err
+	}
 	if _, err := io.WriteString(writer, message); err != nil {
 		writer.Close()
 		return err
