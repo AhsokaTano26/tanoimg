@@ -100,10 +100,10 @@ func (a *App) urlUploader(w http.ResponseWriter, r *http.Request) (string, strin
 	return "", "", false
 }
 
-func (a *App) importRemoteImage(r *http.Request, raw, uploadedBy, uploadedByType string, maxSize int64) (Image, error) {
-	return a.importRemoteWithConfig(r, raw, uploadedBy, uploadedByType, maxSize, privateUploadConfig(a), false)
+func (a *App) importRemoteImage(r *http.Request, raw, uploadedBy, uploadedByType string, maxSize int64, metadata Image) (Image, error) {
+	return a.importRemoteWithConfig(r, raw, uploadedBy, uploadedByType, maxSize, privateUploadConfig(a), false, metadata)
 }
-func (a *App) importRemoteWithConfig(r *http.Request, raw, uploadedBy, uploadedByType string, maxSize int64, config uploadConfig, enforceFormats bool) (Image, error) {
+func (a *App) importRemoteWithConfig(r *http.Request, raw, uploadedBy, uploadedByType string, maxSize int64, config uploadConfig, enforceFormats bool, metadata Image) (Image, error) {
 	u, err := parseRemoteURL(raw)
 	if err != nil {
 		return Image{}, err
@@ -171,6 +171,18 @@ func (a *App) importRemoteWithConfig(r *http.Request, raw, uploadedBy, uploadedB
 		f = processed
 		format, size = processedFormat, processedSize
 	}
+	digest, err := fileMD5(f)
+	if err != nil {
+		return Image{}, err
+	}
+	duplicate := ""
+	admin, apiKeyID := a.duplicateOwner(r)
+	if admin || apiKeyID != "" {
+		duplicate, err = a.findExactDuplicate(f, digest, size, admin, apiKeyID)
+		if err != nil {
+			return Image{}, err
+		}
+	}
 	uuid, err := newID()
 	if err != nil {
 		return Image{}, err
@@ -188,7 +200,11 @@ func (a *App) importRemoteWithConfig(r *http.Request, raw, uploadedBy, uploadedB
 	if original == "." || original == "/" || original == "" {
 		original = "image." + format
 	}
-	im := Image{ID: id, UUID: uuid, Filename: filename, OriginalName: original, Format: format, Size: size, Width: width, Height: height, UploadedBy: uploadedBy, UploadedByType: uploadedByType, UploadedAt: now(), SourceURL: raw, IP: a.clientIP(r)}
+	visibility, _ := uploadVisibility(r)
+	if uploadedByType == "public" {
+		visibility = "public"
+	}
+	im := Image{ID: id, UUID: uuid, Filename: filename, OriginalName: original, Format: format, Size: size, Width: width, Height: height, UploadedBy: uploadedBy, UploadedByType: uploadedByType, Visibility: visibility, UploadedAt: now(), SourceURL: raw, IP: a.clientIP(r), APIKeyID: apiKeyID, Alt: metadata.Alt, Author: metadata.Author, License: metadata.License, Tags: metadata.Tags, MD5: digest, DuplicateOf: duplicate}
 	if uploadedByType == "public" {
 		if publicConfig(a).ContentSafety.Enabled {
 			im.ModerationStatus = "pending"
@@ -221,7 +237,7 @@ func (a *App) uploadURL(w http.ResponseWriter, r *http.Request) {
 	}
 	visibility, validVisibility := uploadVisibility(r)
 	if !validVisibility {
-		fail(w, 400, "visibility 必须为 private 或 public")
+		fail(w, 400, "visibility 必须为 public、unlisted 或 private")
 		return
 	}
 	if visibility == "public" {
@@ -230,9 +246,18 @@ func (a *App) uploadURL(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		URL          json.RawMessage `json:"url"`
 		ReturnBase64 bool            `json:"returnBase64"`
+		Alt          string          `json:"alt"`
+		Author       string          `json:"author"`
+		License      string          `json:"license"`
+		Tags         []string        `json:"tags"`
 	}
 	if json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&body) != nil {
 		fail(w, 400, "无效请求")
+		return
+	}
+	var metadata Image
+	if err := applyUploadMetadata(&metadata, body.Alt, body.Author, body.License, body.Tags); err != nil {
+		fail(w, 400, err.Error())
 		return
 	}
 	var urls []string
@@ -270,12 +295,12 @@ func (a *App) uploadURL(w http.ResponseWriter, r *http.Request) {
 	results := make([]map[string]any, 0, len(urls))
 	errors := make([]map[string]any, 0)
 	for _, raw := range urls {
-		im, err := a.importRemoteImage(r, raw, name, kind, maxSize)
+		im, err := a.importRemoteImage(r, raw, name, kind, maxSize, metadata)
 		if err != nil {
 			errors = append(errors, map[string]any{"success": false, "url": raw, "error": err.Error()})
 			continue
 		}
-		data := map[string]any{"id": im.ID, "uuid": im.UUID, "filename": im.Filename, "format": im.Format, "size": im.Size, "width": im.Width, "height": im.Height, "url": im.URL, "uploadedAt": im.UploadedAt, "uploadedByType": im.UploadedByType}
+		data := map[string]any{"id": im.ID, "uuid": im.UUID, "filename": im.Filename, "format": im.Format, "size": im.Size, "width": im.Width, "height": im.Height, "url": im.URL, "uploadedAt": im.UploadedAt, "uploadedByType": im.UploadedByType, "visibility": im.Visibility, "alt": im.Alt, "author": im.Author, "license": im.License, "tags": im.Tags, "md5": im.MD5, "duplicateOf": im.DuplicateOf}
 		if body.ReturnBase64 {
 			b, err := os.ReadFile(filepath.Join(a.DataDir, "uploads", im.Filename))
 			if err != nil {
@@ -304,17 +329,26 @@ func (a *App) uploadURLs(w http.ResponseWriter, r *http.Request) {
 	}
 	visibility, validVisibility := uploadVisibility(r)
 	if !validVisibility {
-		fail(w, 400, "visibility 必须为 private 或 public")
+		fail(w, 400, "visibility 必须为 public、unlisted 或 private")
 		return
 	}
 	if visibility == "public" {
 		kind = "public"
 	}
 	var body struct {
-		URLs []string `json:"urls"`
+		URLs    []string `json:"urls"`
+		Alt     string   `json:"alt"`
+		Author  string   `json:"author"`
+		License string   `json:"license"`
+		Tags    []string `json:"tags"`
 	}
 	if json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&body) != nil || len(body.URLs) == 0 || len(body.URLs) > 1000 {
 		fail(w, 400, "请提供 1–1000 个图片 URL")
+		return
+	}
+	var metadata Image
+	if err := applyUploadMetadata(&metadata, body.Alt, body.Author, body.License, body.Tags); err != nil {
+		fail(w, 400, err.Error())
 		return
 	}
 	seen := make(map[string]bool, len(body.URLs))
@@ -351,7 +385,7 @@ func (a *App) uploadURLs(w http.ResponseWriter, r *http.Request) {
 		if r.Context().Err() != nil {
 			return
 		}
-		im, err := a.importRemoteImage(r, raw, name, kind, privateLimit(a))
+		im, err := a.importRemoteImage(r, raw, name, kind, privateLimit(a), metadata)
 		if err != nil {
 			failed++
 			send("progress", map[string]any{"index": i + 1, "total": len(urls), "url": raw, "status": "error", "error": err.Error()})
@@ -371,10 +405,19 @@ func (a *App) uploadPublicURL(w http.ResponseWriter, r *http.Request) {
 	}
 	defer release()
 	var body struct {
-		URL string `json:"url"`
+		URL     string   `json:"url"`
+		Alt     string   `json:"alt"`
+		Author  string   `json:"author"`
+		License string   `json:"license"`
+		Tags    []string `json:"tags"`
 	}
 	if json.NewDecoder(http.MaxBytesReader(w, r.Body, 8192)).Decode(&body) != nil || len(body.URL) > 2048 {
 		fail(w, 400, "请提供一个有效的图片 URL")
+		return
+	}
+	var metadata Image
+	if err := applyUploadMetadata(&metadata, body.Alt, body.Author, body.License, body.Tags); err != nil {
+		fail(w, 400, err.Error())
 		return
 	}
 	if _, err := parseRemoteURL(body.URL); err != nil {
@@ -385,7 +428,7 @@ func (a *App) uploadPublicURL(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer func() { <-a.limiter }()
-	im, err := a.importRemoteWithConfig(r, body.URL, "访客", "public", c.MaxFileSize, c, true)
+	im, err := a.importRemoteWithConfig(r, body.URL, "访客", "public", c.MaxFileSize, c, true, metadata)
 	if err != nil {
 		fail(w, 400, err.Error())
 		return

@@ -109,9 +109,9 @@ func (a *App) beginPublicUpload(w http.ResponseWriter, r *http.Request, c upload
 func uploadVisibility(r *http.Request) (string, bool) {
 	value := r.URL.Query().Get("visibility")
 	if value == "" {
-		value = "private"
+		value = "unlisted"
 	}
-	return value, value == "private" || value == "public"
+	return value, value == "private" || value == "unlisted" || value == "public"
 }
 func formatAllowed(formats []string, format string) bool {
 	for _, ext := range formats {

@@ -21,6 +21,8 @@ func (a *App) batchDeleteImages(w http.ResponseWriter, r *http.Request) {
 		fail(w, 400, "请选择 1–1000 张图片")
 		return
 	}
+	actor := a.userID(r)
+	deletedAt := now()
 	tx, err := a.DB.Begin()
 	if err != nil {
 		fail(w, 500, "批量删除失败")
@@ -32,7 +34,7 @@ func (a *App) batchDeleteImages(w http.ResponseWriter, r *http.Request) {
 		if id == "" {
 			continue
 		}
-		result, err := tx.Exec(`UPDATE images SET is_deleted=1,updated_at=? WHERE id=? AND is_deleted=0`, now(), id)
+		result, err := tx.Exec(`UPDATE images SET is_deleted=1,updated_at=?,deleted_at=?,deleted_by=? WHERE id=? AND is_deleted=0`, deletedAt, deletedAt, actor, id)
 		if err != nil {
 			fail(w, 500, "批量删除失败")
 			return
@@ -99,7 +101,7 @@ func (a *App) restoreImage(w http.ResponseWriter, r *http.Request) {
 	if !a.requireAdmin(w, r) {
 		return
 	}
-	result, err := a.DB.Exec(`UPDATE images SET is_deleted=0,updated_at=? WHERE id=? AND is_deleted=1 AND is_nsfw=0`, now(), r.PathValue("id"))
+	result, err := a.DB.Exec(`UPDATE images SET is_deleted=0,updated_at=?,deleted_at='',deleted_by='' WHERE id=? AND is_deleted=1 AND is_nsfw=0`, now(), r.PathValue("id"))
 	if err != nil {
 		fail(w, 500, "恢复图片失败")
 		return

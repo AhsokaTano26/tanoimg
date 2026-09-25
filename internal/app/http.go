@@ -11,8 +11,8 @@ import (
 	"os"
 	"path"
 	"path/filepath"
-	"strconv"
 	"strings"
+	"time"
 )
 
 //go:embed web/*
@@ -66,13 +66,19 @@ func (a *App) Handler() http.Handler {
 	mux.HandleFunc("POST /api/upload/url", a.uploadURL)
 	mux.HandleFunc("POST /api/upload/urls", a.uploadURLs)
 	mux.HandleFunc("GET /api/images", a.images)
+	mux.HandleFunc("GET /api/images/export", a.exportImages)
+	mux.HandleFunc("POST /api/images/export", a.exportImages)
 	mux.HandleFunc("GET /api/images/deleted", a.deletedImages)
 	mux.HandleFunc("DELETE /api/images/batch", a.batchDeleteImages)
+	mux.HandleFunc("PATCH /api/images/batch", a.batchUpdateImageVisibility)
+	mux.HandleFunc("PUT /api/images/visibility", a.batchUpdateImageVisibility)
 	mux.HandleFunc("GET /api/images/nsfw", a.nsfwImages)
 	mux.HandleFunc("POST /api/images/nsfw-clear", a.clearNSFWImages)
 	mux.HandleFunc("GET /api/images/preview/{filename}", a.previewImage)
 	mux.HandleFunc("PUT /api/images/{id}/unmark-nsfw", a.unmarkNSFW)
 	mux.HandleFunc("PUT /api/images/{id}/restore", a.restoreImage)
+	mux.HandleFunc("PATCH /api/images/{id}", a.updateImageMetadata)
+	mux.HandleFunc("PUT /api/images/{id}/metadata", a.updateImageMetadata)
 	mux.HandleFunc("DELETE /api/images/{id}", a.deleteImage)
 	mux.HandleFunc("POST /api/settings/hard-delete", a.hardDeleteImages)
 	mux.HandleFunc("GET /api/config/public", a.getPublicConfig)
@@ -95,8 +101,13 @@ func (a *App) Handler() http.Handler {
 	mux.HandleFunc("GET /api/blacklist", a.listBlacklist)
 	mux.HandleFunc("POST /api/blacklist", a.addBlacklist)
 	mux.HandleFunc("DELETE /api/blacklist/{id}", a.deleteBlacklist)
+	mux.HandleFunc("GET /api/admin/audit", a.auditEvents)
 	mux.HandleFunc("GET /i/{filename}", a.imageFile)
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	a.registerOpsRoutes(mux)
+	a.registerIntegrityRoutes(mux)
+	a.registerRetentionRoutes(mux)
+	a.registerMaintenanceRoutes(mux)
+	return a.auditHandler(a.maintenanceHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet && r.Method != http.MethodHead && r.Method != http.MethodOptions {
 			if origin := r.Header.Get("Origin"); origin != "" {
 				u, err := url.Parse(origin)
@@ -107,7 +118,7 @@ func (a *App) Handler() http.Handler {
 			}
 		}
 		mux.ServeHTTP(w, r)
-	})
+	})))
 }
 
 func (a *App) page(w http.ResponseWriter, r *http.Request) {
@@ -157,33 +168,83 @@ func (a *App) page(w http.ResponseWriter, r *http.Request) {
 
 func (a *App) images(w http.ResponseWriter, r *http.Request) {
 	admin := a.userID(r) != "" && r.URL.Query().Get("scope") != "public"
-	page, _ := strconv.Atoi(r.URL.Query().Get("page"))
-	if page < 1 {
-		page = 1
-	}
-	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
-	if limit < 1 {
-		limit = 20
-	}
-	if limit > 100 {
-		limit = 100
-	}
+	page, limit := pageParams(r)
 	where := `is_deleted=0 AND is_nsfw=0`
+	args := make([]any, 0, 8)
 	if !admin {
-		var cfg struct {
-			ShowOnHomepage bool `json:"showOnHomepage"`
+		where += ` AND visibility='public'`
+	}
+	if visibility := r.URL.Query().Get("visibility"); visibility != "" {
+		if visibility != "public" && visibility != "unlisted" && visibility != "private" {
+			fail(w, 400, "无效可见性筛选")
+			return
 		}
-		json.Unmarshal(a.setting("privateApiConfig", map[string]any{}), &cfg)
-		if !cfg.ShowOnHomepage {
-			where += ` AND uploaded_by_type='public'`
+		where += ` AND visibility=?`
+		args = append(args, visibility)
+	}
+	if format := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("format"))); format != "" {
+		if !formatAllowed([]string{"jpg", "jpeg", "png", "gif", "webp", "avif", "svg", "bmp", "ico", "apng", "tiff"}, format) {
+			fail(w, 400, "无效格式筛选")
+			return
 		}
+		where += ` AND format=?`
+		args = append(args, format)
+	}
+	if tag := strings.TrimSpace(r.URL.Query().Get("tag")); tag != "" {
+		if len([]rune(tag)) > 40 {
+			fail(w, 400, "标签筛选过长")
+			return
+		}
+		where += ` AND EXISTS (SELECT 1 FROM json_each(images.tags_json) WHERE lower(json_each.value)=lower(?))`
+		args = append(args, tag)
+	}
+	if q := strings.TrimSpace(r.URL.Query().Get("q")); q != "" {
+		if len([]rune(q)) > 200 {
+			fail(w, 400, "搜索词过长")
+			return
+		}
+		escaped := strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`).Replace(q)
+		where += ` AND (original_name LIKE ? ESCAPE '\' OR alt LIKE ? ESCAPE '\' OR author LIKE ? ESCAPE '\' OR license LIKE ? ESCAPE '\')`
+		for range 4 {
+			args = append(args, "%"+escaped+"%")
+		}
+	}
+	for _, bound := range []struct{ key, op string }{{"from", ">="}, {"to", "<"}} {
+		value := strings.TrimSpace(r.URL.Query().Get(bound.key))
+		if value == "" {
+			continue
+		}
+		date, err := time.Parse("2006-01-02", value)
+		if err != nil {
+			fail(w, 400, "日期格式须为 YYYY-MM-DD")
+			return
+		}
+		if bound.key == "to" {
+			date = date.AddDate(0, 0, 1)
+		}
+		where += ` AND uploaded_at` + bound.op + `?`
+		args = append(args, date.UTC().Format(time.RFC3339))
+	}
+	order := `uploaded_at DESC,id DESC`
+	switch r.URL.Query().Get("sort") {
+	case "", "newest":
+	case "oldest":
+		order = `uploaded_at ASC,id ASC`
+	case "largest":
+		order = `size DESC,id DESC`
+	case "smallest":
+		order = `size ASC,id ASC`
+	default:
+		fail(w, 400, "无效排序")
+		return
 	}
 	var total int
-	if err := a.DB.QueryRow(`SELECT count(*) FROM images WHERE ` + where).Scan(&total); err != nil {
+	if err := a.DB.QueryRow(`SELECT count(*) FROM images WHERE `+where, args...).Scan(&total); err != nil {
 		fail(w, 500, "查询图片失败")
 		return
 	}
-	rows, err := a.DB.Query(`SELECT `+imageColumns+` FROM images WHERE `+where+` ORDER BY uploaded_at DESC LIMIT ? OFFSET ?`, limit, (page-1)*limit)
+	queryArgs := append(append([]any(nil), args...), limit, (page-1)*limit)
+	rows, err := a.DB.Query(`SELECT `+imageColumns+` FROM images WHERE `+where+` ORDER BY `+order+` LIMIT ? OFFSET ?`, queryArgs...)
 	if err != nil {
 		fail(w, 500, "查询图片失败")
 		return
@@ -199,7 +260,7 @@ func (a *App) images(w http.ResponseWriter, r *http.Request) {
 		if admin {
 			images = append(images, im)
 		} else {
-			images = append(images, map[string]any{"id": im.ID, "uuid": im.UUID, "filename": im.Filename, "originalName": im.OriginalName, "format": im.Format, "size": im.Size, "width": im.Width, "height": im.Height, "url": im.URL, "uploadedBy": im.UploadedBy, "uploadedAt": im.UploadedAt})
+			images = append(images, map[string]any{"id": im.ID, "uuid": im.UUID, "filename": im.Filename, "originalName": im.OriginalName, "format": im.Format, "size": im.Size, "width": im.Width, "height": im.Height, "url": im.URL, "uploadedBy": im.UploadedBy, "uploadedAt": im.UploadedAt, "visibility": im.Visibility, "alt": im.Alt, "author": im.Author, "license": im.License, "tags": im.Tags})
 		}
 	}
 	if rows.Err() != nil {
@@ -213,7 +274,8 @@ func (a *App) deleteImage(w http.ResponseWriter, r *http.Request) {
 	if !a.requireAdmin(w, r) {
 		return
 	}
-	result, err := a.DB.Exec(`UPDATE images SET is_deleted=1,updated_at=? WHERE id=?`, now(), r.PathValue("id"))
+	deletedAt := now()
+	result, err := a.DB.Exec(`UPDATE images SET is_deleted=1,updated_at=?,deleted_at=?,deleted_by=? WHERE id=? AND is_deleted=0`, deletedAt, deletedAt, a.userID(r), r.PathValue("id"))
 	if err != nil {
 		fail(w, 500, "删除失败")
 		return
@@ -237,7 +299,7 @@ func (a *App) serveStoredImage(w http.ResponseWriter, r *http.Request, filename 
 	}
 	uuid := strings.TrimSuffix(filename, path.Ext(filename))
 	im, err := a.getImageByUUID(uuid)
-	if err != nil || im.Filename != filename || (!privileged && im.IsDeleted) {
+	if err != nil || im.Filename != filename || (!privileged && im.IsDeleted) || (!privileged && im.Visibility == "private" && a.userID(r) == "") {
 		http.NotFound(w, r)
 		return
 	}

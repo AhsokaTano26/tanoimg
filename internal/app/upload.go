@@ -86,48 +86,70 @@ func detectFormat(head []byte) string {
 	return ""
 }
 
-func multipartFile(w http.ResponseWriter, r *http.Request, maxSize int64, tempDir string) (*os.File, string, int64, error) {
+func multipartFile(w http.ResponseWriter, r *http.Request, maxSize int64, tempDir string) (*os.File, string, int64, map[string]string, error) {
 	media, params, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
 	if err != nil || media != "multipart/form-data" {
-		return nil, "", 0, fmt.Errorf("需要 multipart/form-data")
+		return nil, "", 0, nil, fmt.Errorf("需要 multipart/form-data")
 	}
 	r.Body = http.MaxBytesReader(w, r.Body, maxSize+(1<<20))
 	mr := multipart.NewReader(r.Body, params["boundary"])
+	var file *os.File
+	var name string
+	var size int64
+	fields := make(map[string]string)
+	failed := func(err error) (*os.File, string, int64, map[string]string, error) {
+		if file != nil {
+			file.Close()
+			os.Remove(file.Name())
+		}
+		return nil, "", 0, nil, err
+	}
 	for {
 		part, err := mr.NextPart()
 		if err == io.EOF {
-			return nil, "", 0, fmt.Errorf("请选择图片")
+			if file == nil {
+				return failed(fmt.Errorf("请选择图片"))
+			}
+			if _, err := file.Seek(0, io.SeekStart); err != nil {
+				return failed(err)
+			}
+			return file, name, size, fields, nil
 		}
 		if err != nil {
-			return nil, "", 0, err
+			return failed(err)
 		}
-		if part.FormName() != "file" && part.FormName() != "image" {
+		field := part.FormName()
+		if field != "file" && field != "image" {
+			if field == "alt" || field == "author" || field == "license" || field == "tags" {
+				value, err := io.ReadAll(io.LimitReader(part, 8193))
+				if err != nil || len(value) > 8192 {
+					part.Close()
+					return failed(fmt.Errorf("图片描述过长"))
+				}
+				fields[field] = strings.TrimSpace(string(value))
+			}
 			part.Close()
 			continue
 		}
-		name := filepath.Base(part.FileName())
+		if file != nil {
+			part.Close()
+			return failed(fmt.Errorf("只能上传一张图片"))
+		}
+		name = filepath.Base(part.FileName())
 		if name == "." || name == "" {
 			part.Close()
-			return nil, "", 0, fmt.Errorf("缺少文件名")
+			return failed(fmt.Errorf("缺少文件名"))
 		}
-		f, err := os.CreateTemp(tempDir, ".tanoimg-upload-*")
+		file, err = os.CreateTemp(tempDir, ".tanoimg-upload-*")
 		if err != nil {
 			part.Close()
-			return nil, "", 0, err
+			return failed(err)
 		}
-		n, err := io.Copy(f, io.LimitReader(part, maxSize+1))
+		size, err = io.Copy(file, io.LimitReader(part, maxSize+1))
 		part.Close()
-		if err != nil || n == 0 || n > maxSize {
-			f.Close()
-			os.Remove(f.Name())
-			return nil, "", 0, fmt.Errorf("文件为空或超过大小限制")
+		if err != nil || size == 0 || size > maxSize {
+			return failed(fmt.Errorf("文件为空或超过大小限制"))
 		}
-		if _, err = f.Seek(0, io.SeekStart); err != nil {
-			f.Close()
-			os.Remove(f.Name())
-			return nil, "", 0, err
-		}
-		return f, name, n, nil
 	}
 }
 
@@ -135,8 +157,10 @@ func (a *App) upload(w http.ResponseWriter, r *http.Request, public bool) {
 	config := privateUploadConfig(a)
 	maxSize := config.MaxFileSize
 	kind := "private"
+	visibility := "unlisted"
 	if public {
 		kind = "public"
+		visibility = "public"
 		c := publicConfig(a)
 		config = c
 		release, allowed := a.beginPublicUpload(w, r, c)
@@ -150,24 +174,32 @@ func (a *App) upload(w http.ResponseWriter, r *http.Request, public bool) {
 		return
 	}
 	if !public {
-		visibility, valid := uploadVisibility(r)
+		selected, valid := uploadVisibility(r)
 		if !valid {
-			fail(w, 400, "visibility 必须为 private 或 public")
+			fail(w, 400, "visibility 必须为 public、unlisted 或 private")
 			return
 		}
-		kind = visibility
+		visibility = selected
+		if visibility == "public" {
+			kind = "public"
+		}
 	}
-	isPublic := kind == "public"
+	isPublic := visibility == "public"
 	if !a.acquireUploadSlot(w, r) {
 		return
 	}
 	defer func() { <-a.limiter }()
-	f, original, size, err := multipartFile(w, r, maxSize, filepath.Join(a.DataDir, "uploads"))
+	f, original, size, fields, err := multipartFile(w, r, maxSize, filepath.Join(a.DataDir, "uploads"))
 	if err != nil {
 		fail(w, 400, err.Error())
 		return
 	}
 	defer func(uploaded *os.File) { uploaded.Close(); os.Remove(uploaded.Name()) }(f)
+	var metadata Image
+	if err := applyUploadMetadata(&metadata, fields["alt"], fields["author"], fields["license"], strings.Split(fields["tags"], ",")); err != nil {
+		fail(w, 400, err.Error())
+		return
+	}
 	head := make([]byte, 512)
 	n, _ := f.Read(head)
 	format := detectFormat(head[:n])
@@ -211,6 +243,20 @@ func (a *App) upload(w http.ResponseWriter, r *http.Request, public bool) {
 		f = processed
 		format, size = processedFormat, processedSize
 	}
+	digest, err := fileMD5(f)
+	if err != nil {
+		fail(w, 500, "计算图片摘要失败")
+		return
+	}
+	duplicate := ""
+	if !public {
+		admin, keyID := a.duplicateOwner(r)
+		duplicate, err = a.findExactDuplicate(f, digest, size, admin, keyID)
+		if err != nil {
+			fail(w, 500, "检查重复图片失败")
+			return
+		}
+	}
 	uuid, err := newID()
 	if err != nil {
 		fail(w, 500, "创建图片失败")
@@ -244,7 +290,7 @@ func (a *App) upload(w http.ResponseWriter, r *http.Request, public bool) {
 			return
 		}
 	}
-	im := Image{ID: id, UUID: uuid, Filename: filename, OriginalName: original, Format: format, Size: size, Width: width, Height: height, UploadedByType: kind, UploadedBy: "API用户", UploadedAt: now(), IP: a.clientIP(r)}
+	im := Image{ID: id, UUID: uuid, Filename: filename, OriginalName: original, Format: format, Size: size, Width: width, Height: height, UploadedByType: kind, Visibility: visibility, UploadedBy: "API用户", UploadedAt: now(), IP: a.clientIP(r), Alt: metadata.Alt, Author: metadata.Author, License: metadata.License, Tags: metadata.Tags, MD5: digest, DuplicateOf: duplicate}
 	if isPublic {
 		im.UploadedBy = "访客"
 		if publicConfig(a).ContentSafety.Enabled {

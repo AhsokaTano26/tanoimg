@@ -1,12 +1,16 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"log"
 	"net/http"
 	"os"
+	"os/signal"
+	"syscall"
 	"time"
 
 	"github.com/AhsokaTano26/tanoimg/internal/app"
@@ -45,12 +49,32 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	defer a.Close()
 	a.StartModeration()
 	a.StartNotifications()
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	retentionDone := a.StartRetention(ctx)
 	server := &http.Server{Addr: *addr, Handler: a.Handler(), ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 1 << 20}
+	shutdownDone := make(chan struct{})
+	go func() {
+		defer close(shutdownDone)
+		<-ctx.Done()
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+		defer cancel()
+		if err := server.Shutdown(shutdownCtx); err != nil {
+			log.Printf("HTTP shutdown: %v", err)
+		}
+	}()
 	log.Printf("TanoImg listening on %s; data=%s", *addr, *data)
-	log.Fatal(server.ListenAndServe())
+	serveErr := server.ListenAndServe()
+	stop()
+	<-shutdownDone
+	<-retentionDone
+	if err := a.Close(); err != nil {
+		log.Printf("close storage: %v", err)
+	}
+	if serveErr != nil && !errors.Is(serveErr, http.ErrServerClosed) {
+		log.Fatal(serveErr)
+	}
 }
 
 func env(key, fallback string) string {

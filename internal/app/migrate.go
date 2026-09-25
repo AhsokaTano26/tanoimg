@@ -2,6 +2,7 @@ package app
 
 import (
 	"bufio"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -128,6 +129,22 @@ func (a *App) MigrateEasyImg(root string) (MigrationReport, error) {
 					}
 				} else {
 					report.Files++
+				}
+				// A rerun synchronizes EasyImg's original fields, but must not reset
+				// visibility and metadata edited in TanoImg after the first import.
+				previous, lookupErr := a.imageByID(im.ID)
+				if lookupErr == nil {
+					im.Visibility = previous.Visibility
+					im.Alt = previous.Alt
+					im.Author = previous.Author
+					im.License = previous.License
+					im.Tags = previous.Tags
+					if im.Filename == previous.Filename && im.Size == previous.Size {
+						im.MD5 = previous.MD5
+					}
+				} else if lookupErr != sql.ErrNoRows {
+					f.Close()
+					return report, lookupErr
 				}
 				if err = a.saveImage(im); err == nil {
 					report.Images++
