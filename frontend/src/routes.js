@@ -1,10 +1,14 @@
-export const settingsPaths=['appearance','site','public-upload','private-upload','apikeys','moderation','moderation-images','notification','account','blacklist','storage','about'];
-const adminPaths=['gallery','upload','recycle','stats','api',...settingsPaths];
+export const settingsPaths=['appearance','site','public-upload','private-upload','apikeys','embed-templates','moderation','moderation-images','notification','account','blacklist','storage','operations','about'];
+const adminPaths=['gallery','upload','recycle','stats','api','shares','albums',...settingsPaths];
 export function routeRecords(views) {
  return [
   {path:'/',name:'home',component:views.gallery},
   {path:'/upload',redirect:()=>({path:'/',hash:'#public-upload'})},
   {path:'/login',name:'login',component:views.login},
+  {path:'/share/:token',name:'share',component:views.share},
+  {path:'/image/:id',name:'image',component:views.imageDetail},
+  {path:'/albums',name:'albums',component:views.publicAlbums},
+  {path:'/albums/:id',name:'album',component:views.publicAlbums},
   {path:'/admin',component:views.layout,meta:{requiresAuth:true},children:[
     {path:'',redirect:'/admin/gallery'},
     ...adminPaths.map(name=>({path:name,name:'admin-'+name,component:views[name]||views.settings,props:{admin:true,publicUpload:name==='public-upload'}})),

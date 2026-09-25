@@ -2,6 +2,8 @@ export const workspaceLinks=[
  {path:'/admin/gallery',name:'图片管理',icon:'images'},
  {path:'/admin/upload',name:'上传图片',icon:'upload'},
  {path:'/admin/recycle',name:'回收站',icon:'trash-2'},
+ {path:'/admin/shares',name:'分享管理',icon:'link'},
+ {path:'/admin/albums',name:'相册管理',icon:'images'},
  {path:'/admin/stats',name:'存储统计',icon:'chart-no-axes-combined'},
  {path:'/admin/api',name:'API 文档',icon:'code-xml'},
 ];
@@ -11,10 +13,12 @@ export const settingsLinks=[
  {path:'/admin/public-upload',name:'公共上传',icon:'upload'},
  {path:'/admin/private-upload',name:'私人上传',icon:'lock-keyhole'},
  {path:'/admin/apikeys',name:'API 密钥',icon:'code-xml'},
+ {path:'/admin/embed-templates',name:'嵌入代码模板',icon:'code-xml'},
  {path:'/admin/moderation',name:'内容审核',icon:'sliders-horizontal'},
  {path:'/admin/notification',name:'通知推送',icon:'link'},
  {path:'/admin/account',name:'账户安全',icon:'lock-keyhole'},
  {path:'/admin/blacklist',name:'IP 黑名单',icon:'triangle-alert'},
  {path:'/admin/storage',name:'存储清理',icon:'trash-2'},
+ {path:'/admin/operations',name:'运行与审计',icon:'chart-no-axes-combined'},
  {path:'/admin/about',name:'关于与版本',icon:'refresh-cw'},
 ];

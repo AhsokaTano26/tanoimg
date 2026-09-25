@@ -6,7 +6,7 @@ import { accessGuard, routeRecords, loginDestination, settingsPaths } from '../s
 function setup(authenticated = false) {
   const session = { admin: authenticated };
   const component = { render() {} };
-  const views = Object.fromEntries(['gallery', 'upload', 'login', 'layout', 'notFound', 'recycle', 'stats', 'api', 'settings'].map(name => [name, component]));
+  const views = Object.fromEntries(['gallery', 'upload', 'login', 'layout', 'notFound', 'recycle', 'stats', 'api', 'settings', 'publicAlbums', 'albums'].map(name => [name, component]));
   const router = createRouter({ history: createMemoryHistory(), routes: routeRecords(views) });
   router.beforeEach(accessGuard(session, async () => session.admin));
   return { router, session };
@@ -19,11 +19,22 @@ test('guests can browse images and upload; all admin routes require login', asyn
     if(path==='/upload') assert.equal(router.currentRoute.value.hash, '#public-upload');
     assert.equal(router.currentRoute.value.meta.requiresAuth, undefined);
   }
-  for (const name of ['gallery', 'upload', 'recycle', 'stats', 'api', ...settingsPaths]) {
+  for (const name of ['gallery', 'upload', 'recycle', 'stats', 'api', 'albums', ...settingsPaths]) {
     await router.push('/admin/' + name);
     assert.equal(router.currentRoute.value.name, 'login');
     assert.equal(router.currentRoute.value.query.redirect, '/admin/' + name);
   }
+});
+test('public album routes stay available to guests while management requires login', async () => {
+  const { router } = setup();
+  for (const path of ['/albums', '/albums/example-id']) {
+    await router.push(path);
+    assert.equal(router.currentRoute.value.path, path);
+    assert.equal(router.currentRoute.value.meta.requiresAuth, undefined);
+  }
+  await router.push('/admin/albums');
+  assert.equal(router.currentRoute.value.name, 'login');
+  assert.equal(router.currentRoute.value.query.redirect, '/admin/albums');
 });
 test('authenticated pages use router navigation, reloadable URLs and history', async () => {
   const { router, session } = setup(true);
