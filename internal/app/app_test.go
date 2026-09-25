@@ -203,6 +203,21 @@ func TestFrontendEntryModuleIsServed(t *testing.T) {
 	}
 }
 
+func TestNewAdminPageReloadsRequireSession(t *testing.T) {
+	a := testApp(t)
+	token := adminToken(t, a)
+	for _, path := range []string{"/admin/albums", "/admin/shares", "/admin/operations", "/admin/embed-templates"} {
+		guest := adminRequest(a, "", http.MethodGet, path, "")
+		if guest.Code != http.StatusSeeOther {
+			t.Fatalf("guest page %s: %d", path, guest.Code)
+		}
+		owner := adminRequest(a, token, http.MethodGet, path, "")
+		if owner.Code != http.StatusOK || !strings.Contains(owner.Header().Get("Content-Type"), "text/html") {
+			t.Fatalf("admin page %s: %d %s", path, owner.Code, owner.Header().Get("Content-Type"))
+		}
+	}
+}
+
 func TestMigrationPreservesLinksAndIsIdempotent(t *testing.T) {
 	old := t.TempDir()
 	newDir := t.TempDir()
