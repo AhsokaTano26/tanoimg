@@ -78,32 +78,24 @@ func newURLClient() *http.Client {
 	}}
 }
 
-func (a *App) urlUploader(w http.ResponseWriter, r *http.Request) (string, string, bool) {
+func (a *App) urlUploader(w http.ResponseWriter, r *http.Request, visibility string) (string, string, apiKeyPrincipal, bool) {
 	if a.userID(r) != "" {
 		var name string
 		if a.DB.QueryRow(`SELECT username FROM users WHERE id=?`, a.userID(r)).Scan(&name) == nil {
-			return name, "url", true
+			return name, "url", apiKeyPrincipal{}, true
 		}
-		return "管理员", "url", true
+		return "管理员", "url", apiKeyPrincipal{}, true
 	}
-	if a.hasAPIKey(r) {
-		key := r.Header.Get("X-API-Key")
-		if key == "" {
-			key = r.URL.Query().Get("apiKey")
-		}
-		var name string
-		if a.DB.QueryRow(`SELECT name FROM apikeys WHERE key=? AND enabled=1`, key).Scan(&name) == nil {
-			return name, "url-api", true
-		}
+	if principal, ok := a.uploadIdentity(w, r, "upload:url", visibility); ok {
+		return principal.Name, "url-api", principal, true
 	}
-	fail(w, 401, "缺少有效的 API Key 或登录状态")
-	return "", "", false
+	return "", "", apiKeyPrincipal{}, false
 }
 
-func (a *App) importRemoteImage(r *http.Request, raw, uploadedBy, uploadedByType string, maxSize int64, metadata Image) (Image, error) {
-	return a.importRemoteWithConfig(r, raw, uploadedBy, uploadedByType, maxSize, privateUploadConfig(a), false, metadata)
+func (a *App) importRemoteImage(r *http.Request, raw, uploadedBy, uploadedByType string, maxSize int64, metadata Image, principal apiKeyPrincipal, key string) (Image, error) {
+	return a.importRemoteWithConfig(r, raw, uploadedBy, uploadedByType, maxSize, privateUploadConfig(a), false, metadata, principal, key)
 }
-func (a *App) importRemoteWithConfig(r *http.Request, raw, uploadedBy, uploadedByType string, maxSize int64, config uploadConfig, enforceFormats bool, metadata Image) (Image, error) {
+func (a *App) importRemoteWithConfig(r *http.Request, raw, uploadedBy, uploadedByType string, maxSize int64, config uploadConfig, enforceFormats bool, metadata Image, principal apiKeyPrincipal, key string) (Image, error) {
 	u, err := parseRemoteURL(raw)
 	if err != nil {
 		return Image{}, err
@@ -158,6 +150,9 @@ func (a *App) importRemoteWithConfig(r *http.Request, raw, uploadedBy, uploadedB
 	if enforceFormats && !formatAllowed(config.AllowedFormats, format) {
 		return Image{}, errors.New("该图片格式未开放上传")
 	}
+	if principal.ID != "" && !principal.AllowsFormat(format) {
+		return Image{}, errors.New("API Key 不允许上传该图片格式")
+	}
 	width, height := 0, 0
 	if cfg, _, err := image.DecodeConfig(f); err == nil {
 		width, height = cfg.Width, cfg.Height
@@ -170,6 +165,14 @@ func (a *App) importRemoteWithConfig(r *http.Request, raw, uploadedBy, uploadedB
 		defer func() { processed.Close(); os.Remove(processed.Name()) }()
 		f = processed
 		format, size = processedFormat, processedSize
+	}
+	stripped, strippedSize, err := a.maybeStripJPEGMetadata(f, format, a.lifecycleSettings().StripJPEGMetadata)
+	if err != nil {
+		return Image{}, err
+	}
+	if stripped != f {
+		defer func() { stripped.Close(); os.Remove(stripped.Name()) }()
+		f, size = stripped, strippedSize
 	}
 	digest, err := fileMD5(f)
 	if err != nil {
@@ -193,6 +196,15 @@ func (a *App) importRemoteWithConfig(r *http.Request, raw, uploadedBy, uploadedB
 	}
 	filename := uuid + "." + format
 	dest := filepath.Join(a.DataDir, "uploads", filename)
+	if err := a.bindUploadKey(r, strings.HasPrefix(r.URL.Path, "/api/upload/public"), key, id); err != nil {
+		return Image{}, err
+	}
+	reservation, err := a.reserveUploadQuota(r.Context(), principal, a.clientIP(r), id, size)
+	if err != nil {
+		return Image{}, err
+	}
+	committed := false
+	defer func() { _ = a.finishUploadQuota(nil, reservation, committed) }()
 	if err := os.Rename(f.Name(), dest); err != nil {
 		return Image{}, err
 	}
@@ -226,18 +238,28 @@ func (a *App) importRemoteWithConfig(r *http.Request, raw, uploadedBy, uploadedB
 			return Image{}, err
 		}
 	}
+	if r.URL.Path == "/api/upload/public/url" && !admin && apiKeyID == "" {
+		im.Receipt, err = a.issueUploadReceipt(im.ID)
+		if err != nil {
+			a.DB.Exec(`DELETE FROM moderation_tasks WHERE image_id=?`, im.ID)
+			a.DB.Exec(`DELETE FROM images WHERE id=?`, im.ID)
+			os.Remove(dest)
+			return Image{}, err
+		}
+	}
 	a.enqueueNotification("upload", "图片上传", original+" 已从 URL 上传", map[string]any{"id": im.ID, "filename": im.Filename, "url": im.URL, "size": im.Size, "ip": im.IP, "type": im.UploadedByType})
+	committed = true
 	return im, nil
 }
 
 func (a *App) uploadURL(w http.ResponseWriter, r *http.Request) {
-	name, kind, valid := a.urlUploader(w, r)
-	if !valid {
-		return
-	}
 	visibility, validVisibility := uploadVisibility(r)
 	if !validVisibility {
 		fail(w, 400, "visibility 必须为 public、unlisted 或 private")
+		return
+	}
+	name, kind, principal, valid := a.urlUploader(w, r, visibility)
+	if !valid {
 		return
 	}
 	if visibility == "public" {
@@ -284,22 +306,39 @@ func (a *App) uploadURL(w http.ResponseWriter, r *http.Request) {
 		fail(w, 400, "Base64 批量返回最多支持 10 张图片")
 		return
 	}
+	if len(urls) > 1 && r.Header.Get("Idempotency-Key") != "" {
+		fail(w, 400, "批量 URL 上传请为每张图片分别使用幂等键")
+		return
+	}
 	maxSize := privateLimit(a)
+	maxSize = principal.MaxFileSize(maxSize)
 	if body.ReturnBase64 && maxSize > 4<<20 {
 		maxSize = 4 << 20
 	}
-	if !a.acquireUploadSlot(w, r) {
-		return
+	key := ""
+	if len(urls) == 1 {
+		var proceed bool
+		key, proceed = a.claimOrReplayUpload(w, r, false)
+		if !proceed {
+			return
+		}
+		defer func() { _ = a.finishUploadKey(r, false, key, "") }()
 	}
-	defer func() { <-a.limiter }()
 	results := make([]map[string]any, 0, len(urls))
 	errors := make([]map[string]any, 0)
 	for _, raw := range urls {
-		im, err := a.importRemoteImage(r, raw, name, kind, maxSize, metadata)
+		releaseSlot, allowed := a.acquireFairUploadSlot(w, r, false)
+		if !allowed {
+			return
+		}
+		im, err := a.importRemoteImage(r, raw, name, kind, maxSize, metadata, principal, key)
+		releaseSlot()
 		if err != nil {
 			errors = append(errors, map[string]any{"success": false, "url": raw, "error": err.Error()})
 			continue
 		}
+		_ = a.finishUploadKey(r, false, key, im.ID)
+		key = ""
 		data := map[string]any{"id": im.ID, "uuid": im.UUID, "filename": im.Filename, "format": im.Format, "size": im.Size, "width": im.Width, "height": im.Height, "url": im.URL, "uploadedAt": im.UploadedAt, "uploadedByType": im.UploadedByType, "visibility": im.Visibility, "alt": im.Alt, "author": im.Author, "license": im.License, "tags": im.Tags, "md5": im.MD5, "duplicateOf": im.DuplicateOf}
 		if body.ReturnBase64 {
 			b, err := os.ReadFile(filepath.Join(a.DataDir, "uploads", im.Filename))
@@ -316,6 +355,11 @@ func (a *App) uploadURL(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if len(results) == 0 {
+		if len(urls) == 1 && errors[0]["error"] == errDailyQuotaExceeded.Error() {
+			w.Header().Set("Retry-After", "86400")
+			fail(w, 429, "已达到今日上传数量或流量配额")
+			return
+		}
 		fail(w, 400, errors[0]["error"].(string))
 		return
 	}
@@ -323,13 +367,13 @@ func (a *App) uploadURL(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *App) uploadURLs(w http.ResponseWriter, r *http.Request) {
-	name, kind, valid := a.urlUploader(w, r)
-	if !valid {
-		return
-	}
 	visibility, validVisibility := uploadVisibility(r)
 	if !validVisibility {
 		fail(w, 400, "visibility 必须为 public、unlisted 或 private")
+		return
+	}
+	name, kind, principal, valid := a.urlUploader(w, r, visibility)
+	if !valid {
 		return
 	}
 	if visibility == "public" {
@@ -364,10 +408,6 @@ func (a *App) uploadURLs(w http.ResponseWriter, r *http.Request) {
 		fail(w, 400, "请提供有效的图片 URL")
 		return
 	}
-	if !a.acquireUploadSlot(w, r) {
-		return
-	}
-	defer func() { <-a.limiter }()
 	w.Header().Set("Content-Type", "text/event-stream; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("X-Accel-Buffering", "no")
@@ -385,7 +425,12 @@ func (a *App) uploadURLs(w http.ResponseWriter, r *http.Request) {
 		if r.Context().Err() != nil {
 			return
 		}
-		im, err := a.importRemoteImage(r, raw, name, kind, privateLimit(a), metadata)
+		releaseSlot, allowed := a.acquireFairUploadSlot(w, r, false)
+		if !allowed {
+			return
+		}
+		im, err := a.importRemoteImage(r, raw, name, kind, principal.MaxFileSize(privateLimit(a)), metadata, principal, "")
+		releaseSlot()
 		if err != nil {
 			failed++
 			send("progress", map[string]any{"index": i + 1, "total": len(urls), "url": raw, "status": "error", "error": err.Error()})
@@ -399,6 +444,16 @@ func (a *App) uploadURLs(w http.ResponseWriter, r *http.Request) {
 
 func (a *App) uploadPublicURL(w http.ResponseWriter, r *http.Request) {
 	c := publicConfig(a)
+	key, proceed := a.claimOrReplayUpload(w, r, true)
+	if !proceed {
+		return
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			_ = a.finishUploadKey(r, true, key, "")
+		}
+	}()
 	release, allowed := a.beginPublicUpload(w, r, c)
 	if !allowed {
 		return
@@ -424,14 +479,25 @@ func (a *App) uploadPublicURL(w http.ResponseWriter, r *http.Request) {
 		fail(w, 400, err.Error())
 		return
 	}
-	if !a.acquireUploadSlot(w, r) {
+	releaseSlot, allowed := a.acquireFairUploadSlot(w, r, true)
+	if !allowed {
 		return
 	}
-	defer func() { <-a.limiter }()
-	im, err := a.importRemoteWithConfig(r, body.URL, "访客", "public", c.MaxFileSize, c, true, metadata)
+	defer releaseSlot()
+	if !a.verifyPublicTurnstile(w, r) {
+		return
+	}
+	im, err := a.importRemoteWithConfig(r, body.URL, "访客", "public", c.MaxFileSize, c, true, metadata, apiKeyPrincipal{}, key)
 	if err != nil {
+		if errors.Is(err, errDailyQuotaExceeded) {
+			w.Header().Set("Retry-After", "86400")
+			fail(w, 429, "已达到今日上传数量或流量配额")
+			return
+		}
 		fail(w, 400, err.Error())
 		return
 	}
+	committed = true
+	_ = a.finishUploadKey(r, true, key, im.ID)
 	ok(w, im)
 }

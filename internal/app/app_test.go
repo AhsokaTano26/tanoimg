@@ -156,9 +156,19 @@ func TestUploadBurstWaitsForFreeSlot(t *testing.T) {
 	}
 	file.Write(tinyPNG(t))
 	form.Close()
-	for range cap(a.limiter) {
-		a.limiter <- struct{}{}
+	releases := make([]func(), 0, 4)
+	for range 4 {
+		release, err := a.uploadScheduler.Acquire(httptest.NewRequest(http.MethodGet, "/", nil).Context(), "saturated")
+		if err != nil {
+			t.Fatal(err)
+		}
+		releases = append(releases, release)
 	}
+	defer func() {
+		for _, release := range releases {
+			release()
+		}
+	}()
 	req := httptest.NewRequest(http.MethodPost, "/api/upload/private", bytes.NewReader(body.Bytes()))
 	req.Header.Set("Content-Type", form.FormDataContentType())
 	req.Header.Set("X-API-Key", "sk-burst")
@@ -169,7 +179,7 @@ func TestUploadBurstWaitsForFreeSlot(t *testing.T) {
 		result <- rec
 	}()
 	time.Sleep(20 * time.Millisecond)
-	<-a.limiter
+	releases[0]()
 	select {
 	case rec := <-result:
 		if rec.Code != http.StatusOK {

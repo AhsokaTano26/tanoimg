@@ -35,6 +35,7 @@ type Config struct {
 }
 
 type App struct {
+	mediaMu          sync.Mutex
 	migrationMu      sync.Mutex
 	migrationWG      sync.WaitGroup
 	migrationActive  string
@@ -47,6 +48,7 @@ type App struct {
 	DataDir          string
 	Version          string
 	limiter          chan struct{}
+	uploadScheduler  *fairUploadScheduler
 	processing       chan struct{}
 	waiters          chan struct{}
 	TrustProxy       bool
@@ -86,6 +88,8 @@ type Image struct {
 	Tags              []string `json:"tags"`
 	MD5               string   `json:"md5,omitempty"`
 	DuplicateOf       string   `json:"duplicateOf,omitempty"`
+	Receipt           string   `json:"receipt,omitempty"`
+	Revision          int64    `json:"-"`
 	ModerationChecked bool     `json:"moderationChecked"`
 	ModerationStatus  string   `json:"moderationStatus,omitempty"`
 	ModerationScore   float64  `json:"moderationScore,omitempty"`
@@ -126,7 +130,7 @@ func New(c Config) (*App, error) {
 	if c.Version == "" {
 		c.Version = "dev"
 	}
-	a := &App{DB: db, DataDir: c.DataDir, Version: c.Version, limiter: make(chan struct{}, 4), processing: make(chan struct{}, 1), waiters: make(chan struct{}, 32), TrustProxy: c.TrustProxy, urlClient: newURLClient(), moderationWake: make(chan struct{}, 1), publicActive: make(map[string]bool), notifyWake: make(chan struct{}, 1)}
+	a := &App{DB: db, DataDir: c.DataDir, Version: c.Version, limiter: make(chan struct{}, 4), uploadScheduler: newFairUploadScheduler(4, 32, 16), processing: make(chan struct{}, 1), waiters: make(chan struct{}, 32), TrustProxy: c.TrustProxy, urlClient: newURLClient(), moderationWake: make(chan struct{}, 1), publicActive: make(map[string]bool), notifyWake: make(chan struct{}, 1)}
 	for _, q := range []string{
 		`PRAGMA journal_mode=WAL`,
 		`CREATE TABLE IF NOT EXISTS images (id TEXT PRIMARY KEY, uuid TEXT NOT NULL UNIQUE, filename TEXT NOT NULL, original_name TEXT NOT NULL DEFAULT '', format TEXT NOT NULL, size INTEGER NOT NULL, width INTEGER NOT NULL DEFAULT 0, height INTEGER NOT NULL DEFAULT 0, uploaded_by TEXT NOT NULL DEFAULT '', uploaded_by_type TEXT NOT NULL DEFAULT 'private', uploaded_at TEXT NOT NULL, updated_at TEXT NOT NULL, is_deleted INTEGER NOT NULL DEFAULT 0, is_nsfw INTEGER NOT NULL DEFAULT 0)`,
@@ -150,6 +154,16 @@ func New(c Config) (*App, error) {
 		}
 	}
 	if err := ensureImageColumns(db); err != nil {
+		db.Close()
+		return nil, err
+	}
+	for _, setup := range []func(*App) error{ensureMediaLifecycleSchema, ensureReportSchema, ensureReceiptSchema, ensureShareSchema, ensureIdempotencySchema, ensureAlbumSchema} {
+		if err := setup(a); err != nil {
+			db.Close()
+			return nil, err
+		}
+	}
+	if err := a.initAPIKeySecurity(); err != nil {
 		db.Close()
 		return nil, err
 	}
@@ -231,6 +245,7 @@ func ensureImageColumns(db *sql.DB) error {
 		"deleted_at TEXT NOT NULL DEFAULT ''", "deleted_by TEXT NOT NULL DEFAULT ''",
 		"visibility TEXT NOT NULL DEFAULT 'unlisted'", "alt TEXT NOT NULL DEFAULT ''", "author TEXT NOT NULL DEFAULT ''",
 		"license TEXT NOT NULL DEFAULT ''", "tags_json TEXT NOT NULL DEFAULT '[]'", "md5 TEXT NOT NULL DEFAULT ''",
+		"revision INTEGER NOT NULL DEFAULT 1",
 	} {
 		name := strings.SplitN(column, " ", 2)[0]
 		if !existing[name] {
@@ -296,7 +311,7 @@ func (a *App) saveImage(im Image) error {
 func scanImage(rows *sql.Rows) (Image, error) {
 	var im Image
 	var tags string
-	err := rows.Scan(&im.ID, &im.UUID, &im.Filename, &im.OriginalName, &im.Format, &im.Size, &im.Width, &im.Height, &im.UploadedBy, &im.UploadedByType, &im.UploadedAt, &im.UpdatedAt, &im.IsDeleted, &im.IsNsfw, &im.ModerationChecked, &im.ModerationStatus, &im.ModerationScore, &im.SourceURL, &im.IP, &im.APIKeyID, &im.DeletedAt, &im.DeletedBy, &im.Visibility, &im.Alt, &im.Author, &im.License, &tags, &im.MD5)
+	err := rows.Scan(&im.ID, &im.UUID, &im.Filename, &im.OriginalName, &im.Format, &im.Size, &im.Width, &im.Height, &im.UploadedBy, &im.UploadedByType, &im.UploadedAt, &im.UpdatedAt, &im.IsDeleted, &im.IsNsfw, &im.ModerationChecked, &im.ModerationStatus, &im.ModerationScore, &im.SourceURL, &im.IP, &im.APIKeyID, &im.DeletedAt, &im.DeletedBy, &im.Visibility, &im.Alt, &im.Author, &im.License, &tags, &im.MD5, &im.Revision)
 	if err == nil {
 		err = json.Unmarshal([]byte(tags), &im.Tags)
 	}
@@ -307,7 +322,7 @@ func scanImage(rows *sql.Rows) (Image, error) {
 	return im, err
 }
 
-const imageColumns = `id,uuid,filename,original_name,format,size,width,height,uploaded_by,uploaded_by_type,uploaded_at,updated_at,is_deleted,is_nsfw,moderation_checked,moderation_status,moderation_score,source_url,ip,api_key_id,deleted_at,deleted_by,visibility,alt,author,license,tags_json,md5`
+const imageColumns = `id,uuid,filename,original_name,format,size,width,height,uploaded_by,uploaded_by_type,uploaded_at,updated_at,is_deleted,is_nsfw,moderation_checked,moderation_status,moderation_score,source_url,ip,api_key_id,deleted_at,deleted_by,visibility,alt,author,license,tags_json,md5,revision`
 
 func (a *App) getImageByUUID(uuid string) (Image, error) {
 	rows, err := a.DB.Query(`SELECT `+imageColumns+` FROM images WHERE uuid=?`, uuid)

@@ -49,15 +49,8 @@ func (a *App) requireAdmin(w http.ResponseWriter, r *http.Request) bool {
 }
 
 func (a *App) hasAPIKey(r *http.Request) bool {
-	key := r.Header.Get("X-API-Key")
-	if key == "" {
-		key = r.URL.Query().Get("apiKey")
-	}
-	if key == "" {
-		return false
-	}
-	var found int
-	return a.DB.QueryRow(`SELECT 1 FROM apikeys WHERE key=? AND enabled=1`, key).Scan(&found) == nil
+	_, ok := a.resolveAPIKey(r, "")
+	return ok
 }
 
 func (a *App) login(w http.ResponseWriter, r *http.Request) {

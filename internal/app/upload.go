@@ -158,6 +158,34 @@ func (a *App) upload(w http.ResponseWriter, r *http.Request, public bool) {
 	maxSize := config.MaxFileSize
 	kind := "private"
 	visibility := "unlisted"
+	var principal apiKeyPrincipal
+	if !public {
+		selected, valid := uploadVisibility(r)
+		if !valid {
+			fail(w, 400, "visibility 必须为 public、unlisted 或 private")
+			return
+		}
+		visibility = selected
+		if visibility == "public" {
+			kind = "public"
+		}
+		var allowed bool
+		principal, allowed = a.uploadIdentity(w, r, "upload:file", visibility)
+		if !allowed {
+			return
+		}
+		maxSize = principal.MaxFileSize(maxSize)
+	}
+	idempotencyKey, proceed := a.claimOrReplayUpload(w, r, public)
+	if !proceed {
+		return
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			_ = a.finishUploadKey(r, public, idempotencyKey, "")
+		}
+	}()
 	if public {
 		kind = "public"
 		visibility = "public"
@@ -169,26 +197,16 @@ func (a *App) upload(w http.ResponseWriter, r *http.Request, public bool) {
 		}
 		defer release()
 		maxSize = c.MaxFileSize
-	} else if a.userID(r) == "" && !a.hasAPIKey(r) {
-		fail(w, 401, "缺少有效的 API Key 或登录状态")
-		return
-	}
-	if !public {
-		selected, valid := uploadVisibility(r)
-		if !valid {
-			fail(w, 400, "visibility 必须为 public、unlisted 或 private")
-			return
-		}
-		visibility = selected
-		if visibility == "public" {
-			kind = "public"
-		}
 	}
 	isPublic := visibility == "public"
-	if !a.acquireUploadSlot(w, r) {
+	releaseSlot, allowed := a.acquireFairUploadSlot(w, r, public)
+	if !allowed {
 		return
 	}
-	defer func() { <-a.limiter }()
+	defer releaseSlot()
+	if public && !a.verifyPublicTurnstile(w, r) {
+		return
+	}
 	f, original, size, fields, err := multipartFile(w, r, maxSize, filepath.Join(a.DataDir, "uploads"))
 	if err != nil {
 		fail(w, 400, err.Error())
@@ -225,6 +243,10 @@ func (a *App) upload(w http.ResponseWriter, r *http.Request, public bool) {
 			return
 		}
 	}
+	if principal.ID != "" && !principal.AllowsFormat(format) {
+		fail(w, 400, "API Key 不允许上传该图片格式")
+		return
+	}
 	if _, err := f.Seek(0, io.SeekStart); err != nil {
 		fail(w, 500, "读取上传文件失败")
 		return
@@ -242,6 +264,15 @@ func (a *App) upload(w http.ResponseWriter, r *http.Request, public bool) {
 		defer func() { processed.Close(); os.Remove(processed.Name()) }()
 		f = processed
 		format, size = processedFormat, processedSize
+	}
+	stripped, strippedSize, err := a.maybeStripJPEGMetadata(f, format, a.lifecycleSettings().StripJPEGMetadata)
+	if err != nil {
+		fail(w, 400, err.Error())
+		return
+	}
+	if stripped != f {
+		defer func() { stripped.Close(); os.Remove(stripped.Name()) }()
+		f, size = stripped, strippedSize
 	}
 	digest, err := fileMD5(f)
 	if err != nil {
@@ -269,6 +300,15 @@ func (a *App) upload(w http.ResponseWriter, r *http.Request, public bool) {
 	}
 	filename := uuid + "." + format
 	dest := filepath.Join(a.DataDir, "uploads", filename)
+	if err := a.bindUploadKey(r, public, idempotencyKey, id); err != nil {
+		fail(w, 500, "无法记录上传幂等键")
+		return
+	}
+	reservation, allowed := a.reserveQuotaOrFail(w, r, principal, id, size)
+	if !allowed {
+		return
+	}
+	defer func() { _ = a.finishUploadQuota(nil, reservation, committed) }()
 	if err := os.Rename(f.Name(), dest); err != nil {
 		if _, seekErr := f.Seek(0, io.SeekStart); seekErr != nil {
 			fail(w, 500, "保存图片失败")
@@ -303,11 +343,7 @@ func (a *App) upload(w http.ResponseWriter, r *http.Request, public bool) {
 	if userID := a.userID(r); userID != "" {
 		a.DB.QueryRow(`SELECT username FROM users WHERE id=?`, userID).Scan(&im.UploadedBy)
 	} else if !public {
-		key := r.Header.Get("X-API-Key")
-		if key == "" {
-			key = r.URL.Query().Get("apiKey")
-		}
-		a.DB.QueryRow(`SELECT id,name FROM apikeys WHERE key=? AND enabled=1`, key).Scan(&im.APIKeyID, &im.UploadedBy)
+		im.APIKeyID, im.UploadedBy = principal.ID, principal.Name
 		if !isPublic {
 			im.UploadedByType = "apikey"
 		}
@@ -327,7 +363,19 @@ func (a *App) upload(w http.ResponseWriter, r *http.Request, public bool) {
 			return
 		}
 	}
+	if public && a.userID(r) == "" && !a.hasAPIKey(r) {
+		im.Receipt, err = a.issueUploadReceipt(im.ID)
+		if err != nil {
+			a.DB.Exec(`DELETE FROM moderation_tasks WHERE image_id=?`, im.ID)
+			a.DB.Exec(`DELETE FROM images WHERE id=?`, im.ID)
+			os.Remove(dest)
+			fail(w, 500, "创建上传凭证失败")
+			return
+		}
+	}
 	a.enqueueNotification("upload", "图片上传", original+" 已上传", map[string]any{"id": im.ID, "filename": im.Filename, "url": im.URL, "size": im.Size, "ip": im.IP, "type": im.UploadedByType})
+	committed = true
+	_ = a.finishUploadKey(r, public, idempotencyKey, im.ID)
 	ok(w, im)
 }
 

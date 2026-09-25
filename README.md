@@ -108,6 +108,10 @@ Docker 部署也可以用 `docker compose run --rm -v /path/to/easyimg:/old:ro t
 | `POST /api/upload/url`、`POST /api/upload/urls` | 管理员或 API Key 上传远程图片；后者使用 SSE 返回进度 |
 | `GET /api/images?page=1&limit=20` | 分页图库；匿名用户只见公开图片 |
 | `GET /i/<uuid>.<格式>` | 图片直链 |
+| `GET /t/<uuid>.<格式>` | 缓存的 320 像素缩略图；JPEG、PNG、GIF/APNG 可生成，其余格式返回 415，访问权限与原图一致 |
+| `POST /api/admin/images/<id>/replace` | 管理员原位替换；格式须与原图相同，ID、UUID 和 `/i/` 路径不变 |
+| `GET /api/admin/images/<id>/versions`、`POST /api/admin/images/<id>/rollback/<version>` | 管理员查看与恢复历史版本 |
+| `GET/PUT /api/settings/image-lifecycle` | 配置历史版本保留数量（默认 3，范围 0–10）及可选 JPEG 元数据移除 |
 | `DELETE /api/images/<id>`、`DELETE /api/images/batch` | 管理员软删除 |
 | `GET /api/images/deleted`、`PUT /api/images/<id>/restore` | 查看和恢复回收站图片 |
 | `GET /api/images/nsfw`、`PUT /api/images/<id>/unmark-nsfw` | 违规图片管理 |
@@ -120,6 +124,8 @@ Docker 部署也可以用 `docker compose run --rm -v /path/to/easyimg:/old:ro t
 | `PUT /api/settings/appearance` | 管理员更新 `backgroundUrl` 和 `backgroundBlur`（0–40） |
 | `GET/PUT /api/notification`、`POST /api/notification/test` | 通知设置与测试 |
 | `GET /api/version/check` | 管理员主动检查 TanoImg 发布版本 |
+
+原图和缩略图使用 `no-cache` 与修订号 ETag，使同一路径替换后的请求重新验证内容。若外部 CDN 覆盖缓存响应头或独立缓存旧文件，仍需在 CDN 侧清除原图和缩略图 URL。启用 JPEG 元数据移除时会清除 EXIF/XMP、IPTC 与注释；含非默认 EXIF 旋转方向的 JPEG 会被拒绝，以避免去除方向标签后显示错误。
 
 上传示例：
 

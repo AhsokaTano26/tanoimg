@@ -101,6 +101,8 @@ func (a *App) restoreImage(w http.ResponseWriter, r *http.Request) {
 	if !a.requireAdmin(w, r) {
 		return
 	}
+	a.mediaMu.Lock()
+	defer a.mediaMu.Unlock()
 	result, err := a.DB.Exec(`UPDATE images SET is_deleted=0,updated_at=?,deleted_at='',deleted_by='' WHERE id=? AND is_deleted=1 AND is_nsfw=0`, now(), r.PathValue("id"))
 	if err != nil {
 		fail(w, 500, "恢复图片失败")
@@ -158,6 +160,8 @@ func (a *App) unmarkNSFW(w http.ResponseWriter, r *http.Request) {
 	if !a.requireAdmin(w, r) {
 		return
 	}
+	a.mediaMu.Lock()
+	defer a.mediaMu.Unlock()
 	var wasDeleted, nsfw bool
 	err := a.DB.QueryRow(`SELECT is_deleted,is_nsfw FROM images WHERE id=?`, r.PathValue("id")).Scan(&wasDeleted, &nsfw)
 	if err == sql.ErrNoRows {
@@ -192,6 +196,8 @@ func (a *App) clearNSFWImages(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *App) purgeImages(w http.ResponseWriter, predicate string) {
+	a.mediaMu.Lock()
+	defer a.mediaMu.Unlock()
 	count := 0
 	errors := make([]string, 0)
 	errorCount := 0
@@ -203,16 +209,19 @@ func (a *App) purgeImages(w http.ResponseWriter, predicate string) {
 	}
 	lastID := ""
 	for {
-		rows, err := a.DB.Query(`SELECT id,uuid,filename FROM images WHERE `+predicate+` AND id>? ORDER BY id LIMIT 100`, lastID)
+		rows, err := a.DB.Query(`SELECT id,uuid,filename,revision FROM images WHERE `+predicate+` AND id>? ORDER BY id LIMIT 100`, lastID)
 		if err != nil {
 			fail(w, 500, "清理图片失败")
 			return
 		}
-		type target struct{ id, uuid, filename string }
+		type target struct {
+			id, uuid, filename string
+			revision           int64
+		}
 		batch := make([]target, 0, 100)
 		for rows.Next() {
 			var item target
-			if err := rows.Scan(&item.id, &item.uuid, &item.filename); err != nil {
+			if err := rows.Scan(&item.id, &item.uuid, &item.filename, &item.revision); err != nil {
 				rows.Close()
 				fail(w, 500, "清理图片失败")
 				return
@@ -241,6 +250,9 @@ func (a *App) purgeImages(w http.ResponseWriter, predicate string) {
 			if _, err := a.DB.Exec(`DELETE FROM images WHERE id=?`, item.id); err != nil {
 				addError(item.uuid)
 				continue
+			}
+			if err := a.cleanupMediaArtifacts(item.id, item.uuid, item.revision); err != nil {
+				addError(item.uuid)
 			}
 			count++
 		}

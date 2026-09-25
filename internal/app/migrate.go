@@ -120,16 +120,6 @@ func (a *App) MigrateEasyImg(root string) (MigrationReport, error) {
 				if im.UpdatedAt == "" {
 					im.UpdatedAt = im.UploadedAt
 				}
-				if err = copyIfMissing(filepath.Join(root, "uploads", filename), filepath.Join(a.DataDir, "uploads", filename)); err != nil {
-					if os.IsNotExist(err) {
-						report.MissingFiles++
-					} else {
-						f.Close()
-						return report, err
-					}
-				} else {
-					report.Files++
-				}
 				// A rerun synchronizes EasyImg's original fields, but must not reset
 				// visibility and metadata edited in TanoImg after the first import.
 				previous, lookupErr := a.imageByID(im.ID)
@@ -139,12 +129,43 @@ func (a *App) MigrateEasyImg(root string) (MigrationReport, error) {
 					im.Author = previous.Author
 					im.License = previous.License
 					im.Tags = previous.Tags
+					if previous.Revision > 1 {
+						// The served bytes were deliberately replaced in TanoImg.
+						// Replaying the old NeDB document must not describe them as old bytes.
+						im.UUID = previous.UUID
+						im.Filename = previous.Filename
+						im.OriginalName = previous.OriginalName
+						im.Format = previous.Format
+						im.Size = previous.Size
+						im.Width = previous.Width
+						im.Height = previous.Height
+						im.MD5 = previous.MD5
+					}
 					if im.Filename == previous.Filename && im.Size == previous.Size {
 						im.MD5 = previous.MD5
 					}
 				} else if lookupErr != sql.ErrNoRows {
 					f.Close()
 					return report, lookupErr
+				}
+				if lookupErr == nil && previous.Revision > 1 {
+					if _, err := os.Stat(filepath.Join(a.DataDir, "uploads", im.Filename)); err == nil {
+						report.Files++
+					} else if os.IsNotExist(err) {
+						report.MissingFiles++
+					} else {
+						f.Close()
+						return report, err
+					}
+				} else if err = copyIfMissing(filepath.Join(root, "uploads", filename), filepath.Join(a.DataDir, "uploads", filename)); err != nil {
+					if os.IsNotExist(err) {
+						report.MissingFiles++
+					} else {
+						f.Close()
+						return report, err
+					}
+				} else {
+					report.Files++
 				}
 				if err = a.saveImage(im); err == nil {
 					report.Images++

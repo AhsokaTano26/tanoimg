@@ -5,6 +5,7 @@ import (
 	"embed"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"io/fs"
 	"net/http"
 	"net/url"
@@ -94,10 +95,6 @@ func (a *App) Handler() http.Handler {
 	mux.HandleFunc("GET /api/notification", a.getNotification)
 	mux.HandleFunc("PUT /api/notification", a.putNotification)
 	mux.HandleFunc("POST /api/notification/test", a.testNotification)
-	mux.HandleFunc("GET /api/apikeys", a.apiKeys)
-	mux.HandleFunc("POST /api/apikeys", a.createAPIKey)
-	mux.HandleFunc("PUT /api/apikeys/{id}", a.updateAPIKey)
-	mux.HandleFunc("DELETE /api/apikeys/{id}", a.deleteAPIKey)
 	mux.HandleFunc("GET /api/blacklist", a.listBlacklist)
 	mux.HandleFunc("POST /api/blacklist", a.addBlacklist)
 	mux.HandleFunc("DELETE /api/blacklist/{id}", a.deleteBlacklist)
@@ -107,6 +104,14 @@ func (a *App) Handler() http.Handler {
 	a.registerIntegrityRoutes(mux)
 	a.registerRetentionRoutes(mux)
 	a.registerMaintenanceRoutes(mux)
+	a.registerMediaLifecycleRoutes(mux)
+	a.registerReportRoutes(mux)
+	a.registerReceiptRoutes(mux)
+	a.registerShareRoutes(mux)
+	a.registerAlbumRoutes(mux)
+	a.registerIdempotencyRoutes(mux)
+	a.registerAPIKeySecurityRoutes(mux)
+	a.registerTurnstileRoutes(mux)
 	return a.auditHandler(a.maintenanceHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet && r.Method != http.MethodHead && r.Method != http.MethodOptions {
 			if origin := r.Header.Get("Origin"); origin != "" {
@@ -124,8 +129,8 @@ func (a *App) Handler() http.Handler {
 func (a *App) page(w http.ResponseWriter, r *http.Request) {
 	name := "index.html"
 	switch r.URL.Path {
-	case "/", "/login", "/gallery", "/upload":
-	case "/admin/appearance", "/admin/site", "/admin/public-upload", "/admin/private-upload", "/admin/apikeys", "/admin/moderation", "/admin/moderation-images", "/admin/notification", "/admin/account", "/admin/blacklist", "/admin/storage", "/admin/about", "/admin", "/admin/gallery", "/admin/upload", "/admin/recycle", "/admin/settings", "/admin/api", "/admin/stats", "/recycle", "/settings", "/api", "/stats":
+	case "/", "/login", "/gallery", "/upload", "/albums":
+	case "/admin/appearance", "/admin/site", "/admin/public-upload", "/admin/private-upload", "/admin/apikeys", "/admin/moderation", "/admin/moderation-images", "/admin/notification", "/admin/account", "/admin/blacklist", "/admin/storage", "/admin/about", "/admin", "/admin/gallery", "/admin/upload", "/admin/recycle", "/admin/settings", "/admin/api", "/admin/stats", "/admin/albums", "/admin/operations", "/admin/shares", "/recycle", "/settings", "/api", "/stats":
 		if a.userID(r) == "" {
 			target := r.URL.Path
 			if !strings.HasPrefix(target, "/admin") {
@@ -140,6 +145,13 @@ func (a *App) page(w http.ResponseWriter, r *http.Request) {
 	case "/icons.svg":
 		name = "icons.svg"
 	default:
+		if strings.HasPrefix(r.URL.Path, "/share/") && strings.Count(r.URL.Path, "/") == 2 && len(r.URL.Path) > len("/share/") {
+			w.Header().Set("Referrer-Policy", "no-referrer")
+			break
+		}
+		if strings.HasPrefix(r.URL.Path, "/albums/") && strings.Count(r.URL.Path, "/") == 2 && len(r.URL.Path) > len("/albums/") {
+			break
+		}
 		name = strings.TrimPrefix(r.URL.Path, "/")
 		if !strings.HasPrefix(name, "assets/") || !fs.ValidPath(name) {
 			http.NotFound(w, r)
@@ -313,7 +325,7 @@ func (a *App) serveStoredImage(w http.ResponseWriter, r *http.Request, filename 
 		return
 	}
 	defer f.Close()
-	info, err := f.Stat()
+	_, err = f.Stat()
 	if err != nil {
 		http.NotFound(w, r)
 		return
@@ -324,8 +336,13 @@ func (a *App) serveStoredImage(w http.ResponseWriter, r *http.Request, filename 
 	if im.Format == "svg" {
 		w.Header().Set("Content-Security-Policy", "sandbox; default-src 'none'; img-src data:; style-src 'unsafe-inline'")
 	}
-	w.Header().Set("Cache-Control", "public, max-age=86400")
-	http.ServeContent(w, r, filename, info.ModTime(), f)
+	if im.Visibility == "private" {
+		w.Header().Set("Cache-Control", "private, no-store")
+	} else {
+		w.Header().Set("Cache-Control", "no-cache, must-revalidate")
+	}
+	w.Header().Set("ETag", fmt.Sprintf(`"image-%s-%d"`, im.UUID, im.Revision))
+	http.ServeContent(w, r, filename, time.Time{}, f)
 }
 
 func mimeFor(format string) string {

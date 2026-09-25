@@ -96,18 +96,9 @@ func (a *App) duplicateOwner(r *http.Request) (bool, string) {
 	if a.userID(r) != "" {
 		return true, ""
 	}
-	key := r.Header.Get("X-API-Key")
-	if key == "" {
-		key = r.URL.Query().Get("apiKey")
-	}
-	if key == "" {
-		return false, ""
-	}
-	var id string
-	if a.DB.QueryRow(`SELECT id FROM apikeys WHERE key=? AND enabled=1`, key).Scan(&id) != nil {
-		return false, ""
-	}
-	return false, id
+	principal, ok := a.resolveAPIKey(r, "")
+	if !ok { return false, "" }
+	return false, principal.ID
 }
 
 func (a *App) findExactDuplicate(source *os.File, digest string, size int64, admin bool, apiKeyID string) (string, error) {

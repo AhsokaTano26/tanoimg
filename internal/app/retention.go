@@ -131,18 +131,19 @@ type retentionImage struct {
 	uuid      string
 	filename  string
 	deletedAt string
+	revision  int64
 }
 
 func (a *App) cleanupRetentionBatch(ctx context.Context, cutoff time.Time, cursor string) (retentionBatchResult, error) {
 	result := retentionBatchResult{NextCursor: cursor}
-	rows, err := a.DB.QueryContext(ctx, `SELECT id,uuid,filename,deleted_at FROM images WHERE is_deleted=1 AND deleted_at!='' AND id>? ORDER BY id LIMIT ?`, cursor, retentionScanBatch+1)
+	rows, err := a.DB.QueryContext(ctx, `SELECT id,uuid,filename,deleted_at,revision FROM images WHERE is_deleted=1 AND deleted_at!='' AND id>? ORDER BY id LIMIT ?`, cursor, retentionScanBatch+1)
 	if err != nil {
 		return result, err
 	}
 	items := make([]retentionImage, 0, retentionScanBatch+1)
 	for rows.Next() {
 		var item retentionImage
-		if err := rows.Scan(&item.id, &item.uuid, &item.filename, &item.deletedAt); err != nil {
+		if err := rows.Scan(&item.id, &item.uuid, &item.filename, &item.deletedAt, &item.revision); err != nil {
 			rows.Close()
 			return result, err
 		}
@@ -186,6 +187,8 @@ func (a *App) cleanupRetentionBatch(ctx context.Context, cutoff time.Time, curso
 }
 
 func (a *App) removeExpiredImage(ctx context.Context, item retentionImage) (bool, error) {
+	a.mediaMu.Lock()
+	defer a.mediaMu.Unlock()
 	if !safeFilename.MatchString(item.filename) || !strings.HasPrefix(item.filename, item.uuid+".") {
 		return false, nil
 	}
@@ -209,7 +212,11 @@ func (a *App) removeExpiredImage(ctx context.Context, item retentionImage) (bool
 	if references != 0 {
 		return false, nil
 	}
-	// Keep artifact removal in one place so thumbnail files can be included later.
+	// Filesystem cleanup may succeed before SQLite commits. On a failure the
+	// deleted image row stays eligible, and the next batch retries missing files.
+	if err := a.cleanupMediaArtifactsWith(tx, item.id, item.uuid, item.revision); err != nil {
+		return false, err
+	}
 	path := filepath.Join(a.DataDir, "uploads", item.filename)
 	info, err := os.Lstat(path)
 	if err == nil && !info.Mode().IsRegular() {
