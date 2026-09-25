@@ -112,6 +112,8 @@ func (a *App) Handler() http.Handler {
 	a.registerIdempotencyRoutes(mux)
 	a.registerAPIKeySecurityRoutes(mux)
 	a.registerTurnstileRoutes(mux)
+	a.registerResumableUploadRoutes(mux)
+	a.registerEmbedTemplateRoutes(mux)
 	return a.auditHandler(a.maintenanceHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet && r.Method != http.MethodHead && r.Method != http.MethodOptions {
 			if origin := r.Header.Get("Origin"); origin != "" {

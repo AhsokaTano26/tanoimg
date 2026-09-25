@@ -53,6 +53,7 @@ func main() {
 	a.StartNotifications()
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	retentionDone := a.StartRetention(ctx)
+	resumableDone := a.StartResumableCleanup(ctx)
 	server := &http.Server{Addr: *addr, Handler: a.Handler(), ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 1 << 20}
 	shutdownDone := make(chan struct{})
 	go func() {
@@ -69,6 +70,7 @@ func main() {
 	stop()
 	<-shutdownDone
 	<-retentionDone
+	<-resumableDone
 	if err := a.Close(); err != nil {
 		log.Printf("close storage: %v", err)
 	}
