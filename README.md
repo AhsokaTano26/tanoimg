@@ -6,8 +6,9 @@
 
 - 图片拖拽、选择、粘贴及批量上传，直链和 Markdown 复制
 - 批量上传固定 4 路并发，提供进度、取消和失败重试；结果列表只保留最近 24 条，避免大量 DOM 和预览对象占用浏览器内存
+- 上传幂等键与结果核对；管理员上传大文件时使用分块续传，浏览器按 1 MiB 分片计算 SHA-256，避免一次读入整张图片
 - 公开/私有上传、URL 单张或批量导入、管理员图库、批量软删除与回收站恢复/清空；管理员可从图库右上角进入回收站
-- 管理员账户、API Key 增删改与重置、IP 黑名单、空间与审核统计
+- 管理员账户、可设权限和额度的 API Key、IP 黑名单、空间与传输统计
 - 可选图片压缩和 WebP/JPEG/PNG 转换；默认直存，启用处理后同一时间只解码一张
 - 可选 NSFW 后台审核（nsfwdet、Elysia Tools、自建 nsfw_detector），Webhook、Telegram、Email、Server酱通知
 - 瀑布流图库、深色模式、公告、API 指南、统计页和移动端界面
@@ -27,7 +28,7 @@
 | 图片格式与转换 | JPEG、PNG、GIF、WebP、AVIF、SVG、BMP、ICO、APNG、TIFF 可直存；JPEG/PNG/WebP 可处理，GIF/APNG 动画保持原文件 |
 | 版本检查 | 管理员手动检查 TanoImg 的 GitHub 发布版本 |
 
-访客只看到公共图片页（`/`）和图库上方的公共上传框（`/#public-upload`，旧 `/upload` 自动跳转），通过 header 的登录入口进入后台。后台位于 `/admin/*`，包括图片管理、上传、回收站、统计、API 指南和设置，需管理员会话才能访问。Vue Router 的 `RouterLink` / `RouterView` 负责页面导航、刷新及浏览器前进后退；旧设置、统计和回收站链接仍会转到对应的受保护页面。旧 JWT 会话不会迁移；旧账户和 API Key 会迁移。
+访客只看到公共图片页（`/`）及公共相册、图片详情、分享页，公共上传框位于图库上方（`/#public-upload`，旧 `/upload` 自动跳转），通过 header 的登录入口进入后台。后台位于 `/admin/*`，包括图片管理、上传、回收站、统计、API 指南和设置，需管理员会话才能访问。Vue Router 的 `RouterLink` / `RouterView` 负责页面导航、刷新及浏览器前进后退；旧设置、统计和回收站链接仍会转到对应的受保护页面。旧 JWT 会话不会迁移；旧账户和 API Key 会迁移。
 
 ## 快速启动
 
@@ -64,11 +65,13 @@ docker compose logs tanoimg
 ## 图库与上传体验
 
 - 图片右键或“更多”菜单可复制直链、HTML、Markdown、BBCode；管理员可设置全局背景、网站 Logo，或将图片移入回收站。
-- 管理员上传可选择私人／公开，默认私人。私人表示不出现在公共图库，已知直链仍可访问；“私人上传”中的兼容设置可以显式开放私人图片展示。
+- 管理员上传可选公开、不列出或私人，默认“不列出”。不列出不进入公共图库，但已知直链仍可访问；私人图片的原图和缩略图需管理员会话或有效分享授权。迁移自 EasyImg 的旧私人图片自动归为“不列出”，保留原直链。
 - 访客在图库上方直接选择、拖放、粘贴图片或输入 URL 上传，无需切换页面。管理员文件和 URL 队列最多 4 路并发；访客队列逐张发送，遵守每 IP 限制。
 - 站点、外观、公共上传、私人上传、密钥、审核、通知、账户、黑名单、存储清理与版本均为独立后台页面。表单、下拉、复选框、菜单、弹窗与移动端抽屉统一封装 PrimeVue；图标使用本地 Lucide 图标库。
 - 允许格式通过复选框选择；页面切换有轻量过渡，遵循系统减少动态效果偏好。
 - 站点公告支持段落、标题、加粗、链接和列表等安全 HTML；横幅与弹窗共用过滤后的渲染，脚本、图片、事件属性及自定义样式不会执行或显示。
+
+图库筛选、标签、相册、详情、分享、原位替换及回滚、匿名上传自删、上传保护与运维功能的使用方式见 [新增功能指南](docs/feature-guide.md)。交互式 API 指南位于后台 `/admin/api`；机器可读的完整接口说明为 [`/api/openapi.json`](internal/app/openapi.json)。
 
 ### 公共上传自动封禁
 
@@ -107,11 +110,17 @@ Docker 部署也可以用 `docker compose run --rm -v /path/to/easyimg:/old:ro t
 | `POST /api/upload/public/url` | 访客 URL 上传，JSON `{"url":"https://…"}`；共用格式、大小、限流、封禁及审核策略 |
 | `POST /api/upload/url`、`POST /api/upload/urls` | 管理员或 API Key 上传远程图片；后者使用 SSE 返回进度 |
 | `GET /api/images?page=1&limit=20` | 分页图库；匿名用户只见公开图片 |
+| `GET /api/images/{id}` | 图片详情；遵守公开、不列出、私人三种可见性 |
+| `GET /api/images/export` | 管理员流式导出图片与元数据 |
 | `GET /i/<uuid>.<格式>` | 图片直链 |
 | `GET /t/<uuid>.<格式>` | 缓存的 320 像素缩略图；JPEG、PNG、GIF/APNG 可生成，其余格式返回 415，访问权限与原图一致 |
 | `POST /api/admin/images/<id>/replace` | 管理员原位替换；格式须与原图相同，ID、UUID 和 `/i/` 路径不变 |
 | `GET /api/admin/images/<id>/versions`、`POST /api/admin/images/<id>/rollback/<version>` | 管理员查看与恢复历史版本 |
 | `GET/PUT /api/settings/image-lifecycle` | 配置历史版本保留数量（默认 3，范围 0–10）及可选 JPEG 元数据移除 |
+| `POST /api/upload/resumable`、`PUT /api/upload/resumable/{id}/chunk`、`POST /api/upload/resumable/{id}/finalize` | 认证用户创建、追加和完成分块上传；`GET` 查询偏移后可续传 |
+| `POST /api/uploads/reconcile` | 用原幂等键查询文件或 URL 上传结果，避免响应丢失后重复创建 |
+| `GET /api/admin/transfer-stats`、`GET/PUT /api/admin/transfer-pricing` | 查询应用流量并按自定义单价估算费用 |
+| `GET /api/openapi.json` | OpenAPI 3.1 接口说明 |
 | `DELETE /api/images/<id>`、`DELETE /api/images/batch` | 管理员软删除 |
 | `GET /api/images/deleted`、`PUT /api/images/<id>/restore` | 查看和恢复回收站图片 |
 | `GET /api/images/nsfw`、`PUT /api/images/<id>/unmark-nsfw` | 违规图片管理 |
@@ -137,7 +146,7 @@ curl -H 'X-API-Key: sk-...' -F 'file=@photo.jpg' http://localhost:3000/api/uploa
 
 ## 批量上传与资源
 
-管理员网页会将所选图片加入上传队列，最多同时发送 4 张。API Key 客户端也建议使用约 4 路并发；服务端同时处理 4 个上传请求，另有 32 个等待位置。队列满时返回 HTTP 429 和 `Retry-After: 1`，客户端应等待后重试。匿名公开上传仍受每 IP 限流约束。
+管理员网页会将所选图片加入上传队列，最多同时发送 4 张。16 MiB 及以上的管理员文件上传使用分块会话；服务器保存偏移，页面在失败后可核对并继续，分块会话有效期为 24 小时。普通文件及 URL 上传使用 `Idempotency-Key`；响应不确定时先调用对账接口再重试原键。API Key 客户端也建议使用约 4 路并发；服务端同时处理 4 个上传请求，另有 32 个等待位置。队列满时返回 HTTP 429 和 `Retry-After: 1`，客户端应等待后重试。匿名公开上传仍受每 IP 限流约束。
 
 性能测试已独立整理为 [性能测试报告（图表、实测数据及 1 GiB / 2 GiB 分析）](PERFORMANCE.md)。报告包含上传并发与错误率、万张实际耗时、转换内存压力、图库与原图读取，以及可复现的科研绘图脚本。
 
