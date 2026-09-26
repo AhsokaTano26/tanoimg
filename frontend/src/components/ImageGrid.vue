@@ -1,15 +1,50 @@
 <script setup>
-import { computed, defineAsyncComponent, onMounted, ref, watch } from 'vue';
+import { computed, defineAsyncComponent, onMounted, onBeforeUnmount, ref, watch } from 'vue';
 import { useRouter } from 'vue-router';
 import { request, session, site, toast, updateSite } from '../runtime.js';
 import { ask } from '../dialogs.js';
 import { imageLinks } from '../image-links.js';
+import { fetchSelectionIDs, sendSelectionBatches } from '../image-selection.js';
 import { renderEmbedTemplate } from '../embed-templates.js';
 const ImageEditor=defineAsyncComponent(()=>import('./ImageEditor.vue'));
-const props = defineProps({ images:Array, busy:Boolean, error:String, selectable:Boolean, recycle:Boolean });
-const emit = defineEmits(['refresh']);
+const props = defineProps({ images:Array, busy:Boolean, error:String, selectable:Boolean, recycle:Boolean, selectionFilters:Object });
+const emit = defineEmits(['refresh','selection-busy']);
 const router = useRouter();
-const selected = ref([]);
+const selected = ref([]), selectingAll = ref(false), allScope = ref(false), batchBusy = ref(false);
+let selectionController;
+watch(() => selectingAll.value || batchBusy.value, value => emit('selection-busy',value));
+const selectionLocked = computed(() => props.busy || !!props.error || selectingAll.value || batchBusy.value);
+const selectedSet = computed(() => new Set(selected.value));
+const allSelected = computed(() => !!props.images?.length && props.images.every(image => selectedSet.value.has(image.id)));
+function selectPage() { if (!selectionLocked.value) { allScope.value=false; selected.value = [...new Set((props.images || []).map(image => image.id))]; } }
+function invertSelection() { if (!selectionLocked.value) { allScope.value=false; selected.value = (props.images || []).filter(image => !selectedSet.value.has(image.id)).map(image => image.id); } }
+function clearSelection() { selectionController?.abort(); selectingAll.value=false; allScope.value=false; selected.value=[]; }
+watch(() => props.busy, busy => { if (busy && !allScope.value) clearSelection(); });
+watch(() => JSON.stringify(props.selectionFilters || {}), clearSelection);
+onBeforeUnmount(() => selectionController?.abort());
+async function selectAll() {
+  if (selectionLocked.value) return;
+  const controller = selectionController = new AbortController();
+  selectingAll.value=true;
+  try {
+    const ids=await fetchSelectionIDs(props.selectionFilters,request,controller.signal);
+    selected.value=ids; allScope.value=true;
+    toast(`已选择当前筛选结果中的 ${ids.length} 张图片`);
+  } catch(error) { if(!controller.signal.aborted)toast(error.message); }
+  finally { if(selectionController===controller)selectingAll.value=false; }
+}
+async function runSelectedBatches(endpoint,method,extra,countField) {
+  if(selectionLocked.value || !selected.value.length)return;
+  batchBusy.value=true; const ids=[...selected.value]; let count=0;
+  try {
+    await sendSelectionBatches(ids, batch => request(endpoint,{method,headers:{'Content-Type':'application/json'},body:JSON.stringify({ids:batch,...extra})}), (batch,result) => {
+      count+=result[countField]||0;
+      const done=new Set(batch);selected.value=selected.value.filter(id=>!done.has(id));
+    });
+    allScope.value=false; toast(`已处理 ${count} 张图片`); emit('refresh');
+  } catch(error) { toast(`已处理 ${count} 张图片，剩余 ${selected.value.length} 张未完成：${error.message}`); }
+  finally {batchBusy.value=false;}
+}
 const selectedVisibility = ref('unlisted');
 const metadata = ref({ alt:'', author:'', license:'', tags:'' });
 const shareDialog = ref(false), shareTitle = ref(''), shareExpiry = ref(0), createdShareUrl = ref(''), creatingShare = ref(false), shareError = ref('');
@@ -18,7 +53,7 @@ const albumDialog = ref(false), albums = ref([]), albumPage = ref(1), albumPages
 const versions = ref([]), versionBusy = ref(false), replaceBusy = ref(false), lifecycleError = ref('');
 const embedTemplates = ref(null);
 watch(shareDialog, value => { if (!value) createdShareUrl.value = ''; });
-watch(() => props.images, images => { const ids=new Set((images || []).map(image=>image.id)); selected.value=selected.value.filter(id=>ids.has(id)); });
+watch(() => props.images, images => { const ids=new Set((images || []).map(image=>image.id)); if(!allScope.value)selected.value=selected.value.filter(id=>ids.has(id)); });
 const menu = ref();
 const current = ref(null);
 const preview = ref(false);
@@ -46,16 +81,12 @@ async function restore(image) {
   catch(error) { toast(error.message); }
 }
 async function batchRemove() {
+  if (selectionLocked.value || !selected.value.length) return;
   if (!await ask('将选中的 '+selected.value.length+' 张图片移入回收站？',{danger:true,accept:'移入回收站'})) return;
-  try { await request('/api/images/batch',{method:'DELETE',headers:{'Content-Type':'application/json'},body:JSON.stringify({ids:selected.value})}); selected.value=[]; emit('refresh'); }
-  catch(error) { toast(error.message); }
+  await runSelectedBatches('/api/images/batch','DELETE',{},'deletedCount');
 }
 async function updateSelectedVisibility() {
-  if (!selected.value.length) return;
-  try {
-    const result=await request('/api/images/visibility',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({ids:selected.value,visibility:selectedVisibility.value})});
-    toast('已更新 '+result.updatedCount+' 张图片');selected.value=[];emit('refresh');
-  } catch(error) { toast(error.message); }
+  await runSelectedBatches('/api/images/visibility','PUT',{visibility:selectedVisibility.value},'updatedCount');
 }
 async function saveMetadata() {
   if (!current.value) return;
@@ -143,7 +174,8 @@ function openMenu(event,image) {
   menu.value.show({pageX:event.pageX || rect.left+window.scrollX+16,pageY:event.pageY || rect.bottom+window.scrollY,preventDefault:()=>event.preventDefault(),stopPropagation:()=>event.stopPropagation()});
 }
 function select(image,value) {
-  selected.value = value ? [...selected.value,image.id] : selected.value.filter(id=>id!==image.id);
+  if (selectionLocked.value) return;
+  selected.value = value ? [...new Set([...selected.value,image.id])] : selected.value.filter(id=>id!==image.id);
 }
 const imageSrc = image => image?.revision ? `${image.url}?r=${image.revision}` : image?.url;
 const thumbUrl = image => ['jpg','jpeg','png','gif','apng'].includes(image.format?.toLowerCase()) && image.filename ? `/t/${encodeURIComponent(image.filename)}${image.revision ? `?r=${image.revision}` : ''}` : imageSrc(image);
@@ -178,12 +210,12 @@ async function rollbackVersion(version) {
 function openPreview(image) { current.value=image;metadata.value={alt:image.alt||'',author:image.author||'',license:image.license||'',tags:(image.tags||[]).join(', ')};versions.value=[];lifecycleError.value='';preview.value=true;if(session.admin && !props.recycle)loadVersions(); }
 </script>
 <template>
-  <div v-if="selectable && session.admin" class="gallery-selection"><span>已选择 {{ selected.length }} 张</span><UiSelect v-model="selectedVisibility" aria-label="批量可见性" :options="[{label:'公开',value:'public'},{label:'不列出',value:'unlisted'},{label:'真正私有',value:'private'}]" /><UiButton :disabled="!selected.length" @click="updateSelectedVisibility">设置可见性</UiButton><UiButton icon="images" :disabled="!selected.length" @click="openAlbumDialog">加入相册</UiButton><UiButton icon="link" :disabled="!selected.length" @click="openShareDialog">创建分享</UiButton><UiButton icon="download" :disabled="!selected.length" @click="exportSelected">导出 ZIP</UiButton><UiButton :disabled="!selected.length" variant="danger" @click="batchRemove">删除所选</UiButton></div>
+  <section v-if="selectable && session.admin" class="gallery-batch" aria-label="图片批量选择"><div class="gallery-select-controls"><span role="status" aria-live="polite">已选择 {{ selected.length }} 张{{ allScope ? '（跨页）' : '（本页）' }}</span><UiButton icon="check" :disabled="selectionLocked || !images?.length || (allSelected && !allScope)" @click="selectPage">全选本页</UiButton><UiButton icon="images" :loading="selectingAll" :disabled="selectionLocked || !images?.length" @click="selectAll">全选全部</UiButton><UiButton icon="refresh-cw" :disabled="selectionLocked || !images?.length" @click="invertSelection">反选本页</UiButton><UiButton icon="x" :disabled="batchBusy || (!selected.length && !selectingAll)" @click="clearSelection">取消选择</UiButton><small>全选全部按当前筛选条件跨页选择；更改筛选后清空选择。</small></div><div class="gallery-selection"><UiSelect v-model="selectedVisibility" aria-label="批量可见性" :options="[{label:'公开',value:'public'},{label:'不列出',value:'unlisted'},{label:'真正私有',value:'private'}]" /><UiButton :disabled="selectionLocked || !selected.length" @click="updateSelectedVisibility">设置可见性</UiButton><UiButton icon="images" :disabled="selectionLocked || !selected.length || selected.length>1000" @click="openAlbumDialog">加入相册</UiButton><UiButton icon="link" :disabled="selectionLocked || !selected.length || selected.length>100" @click="openShareDialog">创建分享</UiButton><UiButton icon="download" :disabled="selectionLocked || !selected.length || selected.length>1000" @click="exportSelected">导出 ZIP</UiButton><UiButton :disabled="selectionLocked || !selected.length" variant="danger" :loading="batchBusy" @click="batchRemove">删除所选</UiButton></div><p v-if="selected.length>100" class="field-help">创建分享最多 100 张；加入相册与单次 ZIP 导出最多 1000 张。删除和设置可见性支持自动分批处理全部所选。</p></section>
   <p v-if="error" class="form-error" role="alert">{{ error }}</p>
   <div :class="['gallery-grid',{'is-empty':!images?.length}]" :aria-busy="busy">
     <div v-if="!images?.length" class="empty"><strong>{{ busy ? '正在加载图片…' : recycle ? '回收站为空' : '这里还没有图片' }}</strong><span v-if="!busy">{{ recycle ? '删除的图片会在这里显示，清空前可以恢复。' : '上传第一张图片，开始记录你的灵感。' }}</span></div>
-    <article v-for="image in images" :key="image.id" class="image-card" @contextmenu.prevent="!recycle && openMenu($event,image)">
-      <div v-if="selectable && session.admin" class="image-select"><UiCheckbox :modelValue="selected.includes(image.id)" :label="'选择 '+image.originalName" @update:modelValue="select(image,$event)" /></div>
+    <article v-for="image in images" :key="image.id" :class="['image-card',{'is-selected':selectedSet.has(image.id)}]" @contextmenu.prevent="!recycle && openMenu($event,image)">
+      <div v-if="selectable && session.admin" class="image-select"><UiCheckbox :modelValue="selectedSet.has(image.id)" :disabled="selectionLocked" :label="'选择 '+image.originalName" @update:modelValue="select(image,$event)" /></div>
       <UiButton class="image-preview" :aria-label="'预览 '+image.originalName" @click="openPreview(image)" @keydown.shift.f10.prevent="openMenu($event,image)"><img :src="thumbUrl(image)" :alt="image.originalName" loading="lazy" @error="thumbFailed($event,image)"></UiButton>
       <div class="image-meta"><div class="image-name">{{ image.originalName || image.filename }}</div><div class="image-sub">{{ (image.size/1024).toFixed(1) }} KB · {{ image.width || '—' }} × {{ image.height || '—' }}<span v-if="selectable" class="visibility-tag">{{ image.visibility==='public' ? '公开' : image.visibility==='private' ? '真正私有' : '不列出' }}</span></div></div>
       <div class="image-actions">
@@ -197,11 +229,19 @@ function openPreview(image) { current.value=image;metadata.value={alt:image.alt|
   <ImageEditor v-if="editorVisible" v-model:visible="editorVisible" :image="editorImage" :admin="session.admin" @saved="editorSaved" />
   <UiDialog v-model:visible="shareDialog" :title="createdShareUrl?'分享已创建':'创建图片分享'">
     <div v-if="createdShareUrl" class="form-stack"><p>分享链接仅在创建时显示，请现在保存。</p><label class="form-field"><span>分享链接</span><UiInput :model-value="createdShareUrl" readonly aria-label="新建分享链接" /></label><div class="inline-actions"><UiButton icon="link" variant="primary" @click="copyShareUrl">复制链接</UiButton><UiButton @click="shareDialog=false">完成</UiButton></div></div>
-    <form v-else class="form-stack" @submit.prevent="createShare"><p>将 {{ selected.length }} 张图片放入一个分享页。链接可访问这些图片，包括不公开列出和仅自己可见的图片。</p><label class="form-field"><span>标题</span><UiInput v-model="shareTitle" :maxlength="200" aria-label="分享标题" placeholder="可选" /></label><label class="form-field"><span>有效期</span><UiSelect v-model="shareExpiry" :options="[{label:'长期有效',value:0},{label:'1 天',value:1},{label:'7 天',value:7},{label:'30 天',value:30},{label:'365 天',value:365}]" aria-label="分享有效期" /></label><p v-if="shareError" role="alert" class="form-error">{{ shareError }}</p><UiButton type="submit" variant="primary" :loading="creatingShare" :disabled="!selected.length">创建分享</UiButton></form>
+    <form v-else class="form-stack" @submit.prevent="createShare"><p>将 {{ selected.length }} 张图片放入一个分享页。链接可访问这些图片，包括不公开列出和仅自己可见的图片。</p><label class="form-field"><span>标题</span><UiInput v-model="shareTitle" :maxlength="200" aria-label="分享标题" placeholder="可选" /></label><label class="form-field"><span>有效期</span><UiSelect v-model="shareExpiry" :options="[{label:'长期有效',value:0},{label:'1 天',value:1},{label:'7 天',value:7},{label:'30 天',value:30},{label:'365 天',value:365}]" aria-label="分享有效期" /></label><p v-if="shareError" role="alert" class="form-error">{{ shareError }}</p><UiButton type="submit" variant="primary" :loading="creatingShare" :disabled="selectionLocked || !selected.length">创建分享</UiButton></form>
   </UiDialog>
   <UiDialog v-model:visible="reportDialog" title="举报图片"><form class="form-stack" @submit.prevent="sendReport"><p>举报 {{ current?.originalName || current?.filename }}。举报信息将交由管理员处理。</p><label class="form-field"><span>原因</span><UiSelect v-model="reportReason" :options="[{label:'请选择原因',value:''},{label:'版权问题',value:'copyright'},{label:'隐私问题',value:'privacy'},{label:'滥用内容',value:'abuse'},{label:'垃圾内容',value:'spam'},{label:'其他',value:'other'}]" aria-label="举报原因" /></label><label class="form-field"><span>补充说明</span><UiInput v-model="reportDetails" type="textarea" :rows="3" :maxlength="1000" aria-label="举报说明" placeholder="可选，最多 1000 字" /></label><p v-if="reportError" role="alert" class="form-error">{{ reportError }}</p><div class="inline-actions"><UiButton type="submit" variant="primary" :loading="reporting">提交举报</UiButton><UiButton @click="reportDialog=false">取消</UiButton></div></form></UiDialog>
   <UiDialog v-model:visible="albumDialog" title="加入相册"><div class="form-stack"><p>将选中的 {{ selected.length }} 张图片加入相册。已在相册中的图片会保留原顺序。</p><p v-if="albumError" role="alert" class="form-error">{{ albumError }}</p><p v-if="albumLoading" role="status">正在读取相册…</p><template v-else-if="albums.length"><label class="form-field"><span>目标相册</span><UiSelect v-model="albumID" :options="albums.map(album=>({label:album.title,value:album.id}))" aria-label="目标相册" /></label><div class="inline-actions"><UiButton :disabled="albumPage<=1" @click="moveAlbumPage(-1)">上一页相册</UiButton><span>{{ albumPage }} / {{ albumPages }}</span><UiButton :disabled="albumPage>=albumPages" @click="moveAlbumPage(1)">下一页相册</UiButton></div><UiButton variant="primary" :loading="albumSaving" @click="addToAlbum">加入相册</UiButton></template><p v-else class="empty">尚无相册。请先在相册管理中创建。</p><RouterLink to="/admin/albums" class="outline-button" @click="albumDialog=false">管理相册</RouterLink></div></UiDialog>
 </template>
 <style scoped>
+.gallery-batch {display:grid;gap:12px;margin-bottom:24px;padding:16px;border:1px solid var(--border);border-radius:12px;background:var(--surface)}
+.gallery-select-controls {display:flex;align-items:center;flex-wrap:wrap;gap:8px}
+.gallery-select-controls>span {margin-right:8px;font-weight:700;font-variant-numeric:tabular-nums}
+.gallery-select-controls small {color:var(--secondary);line-height:1.5}
+.gallery-batch .gallery-selection {margin:0;padding:0;border:0;background:transparent}
+.image-card.is-selected {outline:2px solid var(--primary);outline-offset:-2px}
+@media(max-width:640px) {.gallery-select-controls>span,.gallery-select-controls small {width:100%}}
+
 .image-version-list {grid-column:1/-1;display:grid;gap:8px}.image-version-list article {display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px;border:1px solid var(--border);border-radius:8px;min-width:0}.image-version-list span {overflow-wrap:anywhere;min-width:0}.image-version-list small {color:var(--secondary)}
 </style>

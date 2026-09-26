@@ -25,5 +25,5 @@ export function useImages(endpoint = '/api/images', limit = 20) {
   async function setPerPage(value) { perPage.value=Math.max(1, Math.min(100, Number(value) || limit)); page.value=1; await load(); }
   async function setFilters(value) { filters.value={...value}; page.value=1; await load(); }
   onBeforeUnmount(() => controller?.abort());
-  return { images,page,perPage,total,pages,busy,error,load,go,setPerPage,setFilters };
+  return { images,page,perPage,filters,total,pages,busy,error,load,go,setPerPage,setFilters };
 }

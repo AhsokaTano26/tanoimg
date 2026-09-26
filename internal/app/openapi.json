@@ -3326,7 +3326,30 @@
             }
           }
         },
-        "security": []
+        "security": [],
+        "description": " 管理员可传 selection=all 分页获取当前筛选结果的 ID；每页最多 1000 个，响应 data 为 {ids,nextCursor}，传 after=nextCursor 读取下一批，nextCursor 为空表示结束。此模式不返回图片元数据。",
+        "parameters": [
+          {
+            "name": "selection",
+            "in": "query",
+            "description": "管理员使用 all 获取跨页选择 ID 列表；其他筛选参数保持生效。",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "all"
+              ]
+            }
+          },
+          {
+            "name": "after",
+            "in": "query",
+            "description": "selection=all 的下一批游标，首次省略。",
+            "schema": {
+              "type": "string",
+              "maxLength": 200
+            }
+          }
+        ]
       }
     },
     "/api/images/batch": {
