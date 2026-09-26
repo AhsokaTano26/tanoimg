@@ -196,7 +196,6 @@
 .auth-divider::before,.auth-divider::after {content:'';height:1px;background:var(--border);flex:1}
 @media(max-width:700px){.security-heading {flex-direction:column;gap:12px}}
 
-.account-security>.settings-panel+.settings-panel {margin-top:24px}
 
 /* One material system for routed pages and body-mounted PrimeVue overlays. */
 :root {
@@ -228,17 +227,19 @@
  content:'';position:fixed;inset:0;z-index:0;pointer-events:none;
  background:radial-gradient(ellipse at 35% 0%,var(--ambient-cool),transparent 58%),radial-gradient(ellipse at 100% 80%,var(--ambient-warm),transparent 55%);
 }
+/* Containers own spacing, including mixed card types and component fragments. */
+:root body .admin-shell .page-view {display:flex;flex-direction:column;gap:var(--panel-gap);min-width:0}
+:root body .admin-shell .page-view>* {margin-block:0}
+:root body .admin-shell .page-view>:is(.ui-button,.outline-button,.text-button) {align-self:flex-start}
 :root body .admin-shell .settings-content {display:grid;gap:var(--panel-gap);min-width:0}
-:root body .admin-shell .settings-content>form:not(.settings-panel) {gap:var(--panel-gap)}
-:root body .admin-shell .settings-content>.stats-row {margin-bottom:0}
-:root body .admin-shell :is(.settings-columns,.api-grid,.api-summary,.share-management-list) {gap:var(--panel-gap)}
-:root body .admin-shell :is(.operations-view,.api-documentation) {display:grid;gap:var(--panel-gap)}
-:root body .admin-shell .operations-view>.section-title,:root body .admin-shell .operations-view>.ops-panel {margin:0}
-:root body .admin-shell .page-view:not(.operations-view)>.settings-panel+.settings-panel {margin-top:var(--panel-gap)}
-:root body .admin-shell .appearance-panel {margin-bottom:0}
-:root body .admin-shell .api-documentation>* {margin-block:0}
-:root body .admin-shell .account-security>.settings-panel+.settings-panel {margin-top:var(--panel-gap)}
-:root body .admin-shell :is(.upload-panel,.gallery-filters,.gallery-batch) {margin-bottom:var(--panel-gap)}
+:root body .admin-shell .settings-content>* {margin-block:0}
+:root body .admin-shell .settings-content>:is(.ui-button,.outline-button,.text-button) {justify-self:start}
+:root body .admin-shell .settings-content>form:not(.settings-panel) {display:flex;flex-direction:column;gap:var(--panel-gap)}
+:root body .admin-shell :is(.settings-columns,.api-grid,.api-summary,.api-detail-grid,.share-management-list) {gap:var(--panel-gap)}
+/* Compact nested cards retain a distinct gap without inflating form field spacing. */
+:root body :is(.key-list,.ops-list,.album-admin-list,.album-admin-images,.embed-template-list,.transfer-list,.image-version-list,.upload-results) {display:grid;gap:16px;min-width:0}
+:root body :is(.key-list,.ops-list,.album-admin-list,.album-admin-images,.embed-template-list,.transfer-list,.image-version-list,.upload-results)>* {margin-block:0}
+:root body .key-list>.key-row {padding:16px;border:1px solid var(--glass-edge);border-radius:12px}
 :root body .admin-shell .settings-panel {padding:32px}
 :root body :is(.settings-panel,.stats-row,.gallery-filters,.gallery-batch,.upload-panel,.upload-progress,.loading-panel,.empty,.login-card,.detail-card,.album-image,.share-card,.album-card,.api-summary>div) {border-radius:20px}
 @supports ((backdrop-filter:blur(1px)) or (-webkit-backdrop-filter:blur(1px))) {
