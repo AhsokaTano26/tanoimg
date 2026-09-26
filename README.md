@@ -11,7 +11,7 @@
 - 公开/私有上传、URL 单张或批量导入、管理员图库、批量软删除与回收站恢复/清空；管理员可从图库右上角进入回收站
 - 管理员账户、可设权限和额度的 API Key、IP 黑名单、空间与传输统计
 - 可选图片压缩和 WebP/JPEG/PNG 转换；默认直存，启用处理后同一时间只解码一张
-- 可选 NSFW 后台审核（nsfwdet、Elysia Tools、自建 nsfw_detector），Webhook、Telegram、Email、Server酱通知
+- 可选 NSFW 后台审核（nsfwdet、Elysia Tools、自建 nsfw_detector）；Webhook、Telegram、Email、Server酱通知可并存，且每种渠道可配置多个目标
 - 瀑布流图库、深色模式、公告、API 指南、统计页和移动端界面
 - 石墨深色 / 浅色界面，所有图标使用本地 Lucide；管理员可上传背景图片、填写 HTTPS 图片地址，并调节 0–40 px 模糊度
 - 导入 EasyImg 的 NeDB `images.db`、`users.db`、`apikeys.db`、`settings.db`、`moderation_tasks.db`、`ip_blacklist.db` 和 `uploads/`
@@ -62,6 +62,12 @@ docker compose logs tanoimg
 ## 登录安全
 
 支持可选 TOTP 二次验证、一次性恢复码和 Passkey 直接登录。在“账户安全”管理；Docker 部署启用 Passkey 需设置 `TANOIMG_PUBLIC_URL=https://你的域名`。备份完整数据卷，包含新增的 `auth.key` 加密密钥。详见 [认证配置与使用](docs/authentication.md)。
+
+## 通知推送
+
+在后台“通知推送”中添加多个目标并分别测试。登录、上传和审核事件会送往所有已启用的目标；每个目标单独排队和重试，一个目标失败不会让其他目标重复收到消息。旧版单渠道配置会显示为“原有通知目标”，旧自定义 Webhook 请求模板继续可用。
+
+新增 Webhook 目标填写接收端的完整 URL，例如 `https://你的服务/webhook/general`。TanoImg 会以 `POST`、`Content-Type: application/json` 发送 `message`、`title`、`source`、`level`、`timestamp`、`fields`，有可用的绝对图片链接时再发送 `url`；不发送额外顶层字段，且会校验接收端排版后的 1900 字符上限。接收端的 `GENERAL_WEBHOOK_GROUP_OPENID` 属于 QQ 机器人服务配置，**不需要设置在 TanoImg**。目标返回 502/503 等非 2xx 状态时，TanoImg 对该目标重试，最多三次；可在“运行与审计”查看失败任务。
 
 ## 图库与上传体验
 

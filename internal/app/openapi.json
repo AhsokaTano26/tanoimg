@@ -4190,7 +4190,7 @@
         "tags": [
           "API"
         ],
-        "summary": "Get /api/notification",
+        "summary": "Get multi-destination notification settings",
         "operationId": "get_api_notification",
         "responses": {
           "200": {
@@ -4234,7 +4234,7 @@
         "tags": [
           "API"
         ],
-        "summary": "Put /api/notification",
+        "summary": "Save multi-destination notification settings",
         "operationId": "put_api_notification",
         "responses": {
           "200": {
@@ -4272,7 +4272,17 @@
           {
             "bearerAuth": []
           }
-        ]
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NotificationConfiguration"
+              }
+            }
+          }
+        }
       }
     },
     "/api/notification/test": {
@@ -4280,7 +4290,7 @@
         "tags": [
           "API"
         ],
-        "summary": "Post /api/notification/test",
+        "summary": "Send test notification to one destination or every enabled destination",
         "operationId": "post_api_notification_test",
         "responses": {
           "200": {
@@ -4318,7 +4328,28 @@
           {
             "bearerAuth": []
           }
-        ]
+        ],
+        "parameters": [
+          {
+            "name": "channel",
+            "in": "query",
+            "required": false,
+            "description": "Destination ID. Omit to test every enabled destination.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NotificationConfiguration"
+              }
+            }
+          }
+        }
       }
     },
     "/api/openapi.json": {
@@ -6019,6 +6050,131 @@
             }
           }
         ]
+      },
+      "NotificationDestination": {
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "type",
+          "enabled"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "maxLength": 80,
+            "description": "Stable destination identifier; letters, digits, underscore, and hyphen."
+          },
+          "name": {
+            "type": "string",
+            "maxLength": 100
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "webhook",
+              "email",
+              "telegram",
+              "serverchan"
+            ]
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "webhook": {
+            "type": "object",
+            "properties": {
+              "url": {
+                "type": "string",
+                "format": "uri"
+              },
+              "protocol": {
+                "type": "string",
+                "enum": [
+                  "general",
+                  "legacy"
+                ]
+              }
+            },
+            "description": "New webhooks use the general JSON protocol; legacy preserves prior custom templates."
+          },
+          "email": {
+            "type": "object",
+            "properties": {
+              "service": {
+                "type": "string",
+                "enum": [
+                  "gmail",
+                  "qq",
+                  "163",
+                  "outlook"
+                ]
+              },
+              "user": {
+                "type": "string"
+              },
+              "pass": {
+                "type": "string"
+              },
+              "to": {
+                "type": "string"
+              }
+            }
+          },
+          "telegram": {
+            "type": "object",
+            "properties": {
+              "token": {
+                "type": "string"
+              },
+              "chatId": {
+                "type": "string"
+              }
+            }
+          },
+          "serverchan": {
+            "type": "object",
+            "properties": {
+              "sendKey": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      },
+      "NotificationConfiguration": {
+        "type": "object",
+        "required": [
+          "enabled",
+          "types",
+          "channels"
+        ],
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "types": {
+            "type": "object",
+            "properties": {
+              "login": {
+                "type": "boolean"
+              },
+              "upload": {
+                "type": "boolean"
+              },
+              "nsfw": {
+                "type": "boolean"
+              }
+            }
+          },
+          "channels": {
+            "type": "array",
+            "maxItems": 32,
+            "items": {
+              "$ref": "#/components/schemas/NotificationDestination"
+            }
+          }
+        }
       }
     }
   }
