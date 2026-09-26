@@ -20,9 +20,10 @@ import (
 )
 
 type notificationConfig struct {
-	Enabled bool   `json:"enabled"`
-	Method  string `json:"method"`
-	Types   struct {
+	Enabled  bool                      `json:"enabled"`
+	Method   string                    `json:"method"`
+	Channels []notificationDestination `json:"channels"`
+	Types    struct {
 		Login  bool `json:"login"`
 		Upload bool `json:"upload"`
 		NSFW   bool `json:"nsfw"`
@@ -70,11 +71,30 @@ func defaultNotificationConfig() notificationConfig {
 
 func (a *App) notificationSettings() notificationConfig {
 	c := defaultNotificationConfig()
-	json.Unmarshal(a.setting("notificationConfig", c), &c)
+	var stored string
+	if err := a.DB.QueryRow(`SELECT value FROM settings WHERE key='notificationConfig'`).Scan(&stored); err == sql.ErrNoRows {
+		c.Channels = []notificationDestination{}
+		return c
+	} else if err == nil {
+		_ = json.Unmarshal([]byte(stored), &c)
+	}
+	c.Channels = normalizedNotificationDestinations(c)
 	return c
 }
 
 func validateNotification(c notificationConfig) error {
+	if c.Channels != nil {
+		if c.Enabled {
+			active := false
+			for _, channel := range c.Channels {
+				active = active || channel.Enabled
+			}
+			if !active {
+				return errors.New("启用通知前请添加并启用至少一个目标")
+			}
+		}
+		return validateNotificationDestinations(c.Channels)
+	}
 	switch c.Method {
 	case "webhook", "telegram", "email", "serverchan":
 	default:
@@ -149,13 +169,43 @@ func (a *App) testNotification(w http.ResponseWriter, r *http.Request) {
 		fail(w, 400, "通知配置无效")
 		return
 	}
-	if err := validateNotification(c); err != nil {
+	payload := notificationPayload{Type: "test", Title: "TanoImg 测试通知", Message: "测试通知发送成功", Timestamp: now(), Data: map[string]any{}}
+	channels := normalizedNotificationDestinations(c)
+	requested := r.URL.Query().Get("channel")
+	if requested != "" {
+		selected := channels[:0]
+		for _, channel := range channels {
+			if channel.ID == requested {
+				selected = append(selected, channel)
+			}
+		}
+		channels = selected
+		if len(channels) == 0 {
+			fail(w, 404, "通知目标不存在")
+			return
+		}
+	}
+	if err := validateNotificationDestinations(channels); err != nil {
 		fail(w, 400, err.Error())
 		return
 	}
-	payload := notificationPayload{Type: "test", Title: "TanoImg 测试通知", Message: "测试通知发送成功", Timestamp: now(), Data: map[string]any{}}
-	if err := a.sendNotification(r.Context(), c, payload); err != nil {
-		fail(w, 502, err.Error())
+	var failures []string
+	sent := false
+	for _, channel := range channels {
+		if !channel.Enabled {
+			continue
+		}
+		sent = true
+		if err := a.sendNotificationDestination(r.Context(), channel, payload); err != nil {
+			failures = append(failures, channel.Name+": "+err.Error())
+		}
+	}
+	if len(failures) > 0 {
+		fail(w, 502, strings.Join(failures, "; "))
+		return
+	}
+	if !sent {
+		fail(w, 400, "没有启用的通知目标")
 		return
 	}
 	ok(w, map[string]bool{"sent": true})
@@ -173,7 +223,26 @@ func (a *App) enqueueNotification(kind, title, message string, data map[string]a
 	if err != nil {
 		return
 	}
-	if _, err := a.DB.Exec(`INSERT INTO notification_events(kind,payload) VALUES(?,?)`, kind, string(payload)); err == nil {
+	channels := normalizedNotificationDestinations(c)
+	tx, err := a.DB.Begin()
+	if err != nil {
+		return
+	}
+	defer tx.Rollback()
+	queued := false
+	for _, channel := range channels {
+		if !channel.Enabled {
+			continue
+		}
+		if _, err := tx.Exec(`INSERT INTO notification_events(kind,payload,destination_id) VALUES(?,?,?)`, kind, string(payload), channel.ID); err != nil {
+			return
+		}
+		queued = true
+	}
+	if !queued {
+		return
+	}
+	if err := tx.Commit(); err == nil {
 		select {
 		case a.notifyWake <- struct{}{}:
 		default:
@@ -213,9 +282,9 @@ func (a *App) StartNotifications() {
 
 func (a *App) processOneNotification(ctx context.Context) error {
 	var id int64
-	var kind, raw string
+	var kind, raw, destinationID string
 	var retry int
-	if err := a.DB.QueryRow(`SELECT id,kind,payload,retry_count FROM notification_events WHERE status='pending' AND next_attempt<=? ORDER BY id LIMIT 1`, time.Now().Unix()).Scan(&id, &kind, &raw, &retry); err != nil {
+	if err := a.DB.QueryRow(`SELECT id,kind,payload,retry_count,destination_id FROM notification_events WHERE status='pending' AND next_attempt<=? ORDER BY id LIMIT 1`, time.Now().Unix()).Scan(&id, &kind, &raw, &retry, &destinationID); err != nil {
 		return err
 	}
 	var payload notificationPayload
@@ -227,7 +296,19 @@ func (a *App) processOneNotification(ctx context.Context) error {
 		_, err := a.DB.Exec(`DELETE FROM notification_events WHERE id=?`, id)
 		return err
 	}
-	err := a.sendNotification(ctx, c, payload)
+	var err error
+	if destinationID == "" {
+		destinationID = "legacy"
+	}
+	for _, channel := range c.Channels {
+		if channel.ID != destinationID {
+			continue
+		}
+		if channel.Enabled {
+			err = a.sendNotificationDestination(ctx, channel, payload)
+		}
+		break
+	}
 	if err == nil {
 		_, err = a.DB.Exec(`DELETE FROM notification_events WHERE id=?`, id)
 		return err

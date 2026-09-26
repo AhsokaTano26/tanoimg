@@ -157,6 +157,10 @@ func New(c Config) (*App, error) {
 		db.Close()
 		return nil, err
 	}
+	if err := ensureNotificationDestinationColumn(db); err != nil {
+		db.Close()
+		return nil, err
+	}
 	for _, setup := range []func(*App) error{ensureMediaLifecycleSchema, ensureReportSchema, ensureReceiptSchema, ensureShareSchema, ensureIdempotencySchema, ensureAlbumSchema} {
 		if err := setup(a); err != nil {
 			db.Close()
