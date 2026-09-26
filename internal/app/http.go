@@ -187,6 +187,10 @@ func (a *App) page(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *App) images(w http.ResponseWriter, r *http.Request) {
+	selection := r.URL.Query().Get("selection") == "all"
+	if selection && !a.requireAdmin(w, r) {
+		return
+	}
 	admin := a.userID(r) != "" && r.URL.Query().Get("scope") != "public"
 	page, limit := pageParams(r)
 	where := `is_deleted=0 AND is_nsfw=0`
@@ -256,6 +260,10 @@ func (a *App) images(w http.ResponseWriter, r *http.Request) {
 		order = `size ASC,id ASC`
 	default:
 		fail(w, 400, "无效排序")
+		return
+	}
+	if selection {
+		a.imageSelectionIDs(w, r, where, args)
 		return
 	}
 	var total int
