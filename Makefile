@@ -1,6 +1,6 @@
 .PHONY: build frontend
 
-VERSION ?= 0.1.0
+VERSION ?= 1.0.0
 
 build: frontend
 	go build -trimpath -ldflags "-X main.version=$(VERSION)" -o tanoimg ./cmd/tanoimg
